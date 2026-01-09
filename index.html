@@ -95,17 +95,28 @@
     });
 
     // SINCRONIZAR: Escucha cambios y actualiza el mapa para todos
+    // --- REEMPLAZA TU FUNCIÓN onSnapshot CON ESTA ---
     onSnapshot(dibujosRef, (snapshot) => {
-      drawnItems.clearLayers();
-      snapshot.forEach((documento) => {
-        const data = documento.data();
-        L.geoJSON(data.feature, {
-          onEachFeature: (f, l) => {
-            l.options.firebaseId = documento.id;
-            l.bindPopup(`<b>Autor:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
-            drawnItems.addLayer(l);
-          }
-        });
+      // En lugar de borrar todo de golpe, manejamos los cambios
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added") {
+          const data = change.doc.data();
+          L.geoJSON(data.feature, {
+            onEachFeature: (f, l) => {
+              l.options.firebaseId = change.doc.id; // Guardamos el ID de Firebase
+              l.bindPopup(`<b>Autor:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
+              drawnItems.addLayer(l);
+            }
+          });
+        }
+        if (change.type === "removed") {
+          // Si alguien borra algo en la nube, lo quitamos de nuestra pantalla
+          drawnItems.eachLayer((layer) => {
+            if (layer.options.firebaseId === change.doc.id) {
+              drawnItems.removeLayer(layer);
+            }
+          });
+        }
       });
     });
 
@@ -135,4 +146,5 @@
     });
   </script>
 </body>
+
 </html>
