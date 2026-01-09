@@ -35,7 +35,6 @@
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 
   <script type="module">
-    // --- INTEGRACIÓN FIREBASE CON TUS CREDENCIALES REALES ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js";
     import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
 
@@ -55,11 +54,9 @@
 
     const miNombre = prompt("Identifícate para colaborar:") || "Anónimo";
 
-    // --- CONFIGURACIÓN MAPA (LEAFLET) ---
     const map = L.map('map').setView([-27.366, -70.332], 15);
     const drawnItems = new L.FeatureGroup().addTo(map);
 
-    // Fondo por defecto: Esri Satélite
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery'
     }).addTo(map);
@@ -69,50 +66,65 @@
       draw: { circlemarker: false }
     }).addTo(map);
 
-    // GUARDAR: Se sube a Firebase al terminar de dibujar
+    // --- LÓGICA DE GUARDADO ---
     map.on(L.Draw.Event.CREATED, async (e) => {
       const layer = e.layer;
       const geojson = layer.toGeoJSON();
       
+      // Removemos la capa local inmediatamente para evitar la "doble vista"
+      // Firebase la volverá a pintar en un milisegundo con su ID real
+      map.removeLayer(layer); 
+
       try {
         await addDoc(dibujosRef, {
           feature: geojson,
           autor: miNombre,
-          fecha: new Date().toLocaleString('es-CL')
+          fecha: new Date().toLocaleString('es-CL'),
+          clientToken: Math.random().toString(36).substring(7) // Identificador único de sesión
         });
       } catch (err) {
-        console.error("Error al guardar en Firebase:", err);
+        console.error("Error al guardar:", err);
       }
     });
 
-    // BORRAR: Elimina el registro de la base de datos sincronizada
+    // --- LÓGICA DE BORRADO ---
     map.on(L.Draw.Event.DELETED, (e) => {
       e.layers.eachLayer(async (layer) => {
         if (layer.options.firebaseId) {
-          await deleteDoc(doc(db, "geometrias", layer.options.firebaseId));
+          try {
+            await deleteDoc(doc(db, "geometrias", layer.options.firebaseId));
+          } catch (err) {
+            console.error("Error al borrar:", err);
+          }
         }
       });
     });
 
-    // SINCRONIZAR: Escucha cambios y actualiza el mapa para todos
-    // --- REEMPLAZA TU FUNCIÓN onSnapshot CON ESTA ---
+    // --- SINCRONIZACIÓN CORREGIDA ---
     onSnapshot(dibujosRef, (snapshot) => {
-      // En lugar de borrar todo de golpe, manejamos los cambios
       snapshot.docChanges().forEach((change) => {
+        const id = change.doc.id;
+
         if (change.type === "added") {
-          const data = change.doc.data();
-          L.geoJSON(data.feature, {
-            onEachFeature: (f, l) => {
-              l.options.firebaseId = change.doc.id; // Guardamos el ID de Firebase
-              l.bindPopup(`<b>Autor:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
-              drawnItems.addLayer(l);
-            }
-          });
+          // Verificamos si ya existe en pantalla para no duplicar
+          let existe = false;
+          drawnItems.eachLayer(l => { if(l.options.firebaseId === id) existe = true; });
+
+          if (!existe) {
+            const data = change.doc.data();
+            L.geoJSON(data.feature, {
+              onEachFeature: (f, l) => {
+                l.options.firebaseId = id;
+                l.bindPopup(`<b>Autor:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
+                drawnItems.addLayer(l);
+              }
+            });
+          }
         }
+        
         if (change.type === "removed") {
-          // Si alguien borra algo en la nube, lo quitamos de nuestra pantalla
           drawnItems.eachLayer((layer) => {
-            if (layer.options.firebaseId === change.doc.id) {
+            if (layer.options.firebaseId === id) {
               drawnItems.removeLayer(layer);
             }
           });
@@ -120,31 +132,29 @@
       });
     });
 
-    // COORDENADAS EN BARRA SUPERIOR
+    // --- FUNCIONES EXTRA ---
     map.on('mousemove', e => {
       document.getElementById('coords').textContent = `Lat/Lon: ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
     });
 
-    // DESCARGAR GEOJSON PARA QGIS/ARCGIS
     document.getElementById('btnDescargar').addEventListener('click', () => {
       const data = drawnItems.toGeoJSON();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `gis_pucobre_${new Date().getTime()}.geojson`;
+      a.download = `gis_pucobre.geojson`;
       a.click();
     });
 
-    // APLICAR FONDO XYZ PERSONALIZADO
     document.getElementById('btnAplicar').addEventListener('click', () => {
       const url = document.getElementById('xyzUrl').value.trim();
       if (url) L.tileLayer(url).addTo(map);
     });
 
     document.getElementById('btnLimpiar').addEventListener('click', () => {
+      // OJO: Esto solo limpia tu pantalla temporalmente, al haber un cambio en Firebase volverán a aparecer.
       drawnItems.clearLayers();
     });
   </script>
 </body>
-
 </html>
