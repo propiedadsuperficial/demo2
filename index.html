@@ -9,17 +9,17 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
   
   <style>
-    html, body { height: 100%; margin: 0; }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
     #map { height: calc(100vh - 84px); }
     .toolbar {
       display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
       padding: 10px; border-bottom: 1px solid #e0e0e0; font-family: system-ui, Arial;
       background: #fafafa;
     }
-    .toolbar input[type=text] { width: 350px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+    .toolbar input[type=text] { width: 300px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
     .toolbar button { padding: 6px 10px; border: 1px solid #2c7be5; background: #2c7be5; color: #fff; border-radius: 4px; cursor: pointer; }
     .toolbar button.secondary { border-color: #666; background: #f5f5f5; color: #333; }
-    .coords { margin-left: auto; font-weight: bold; font-size: 0.9em; }
+    .coords { margin-left: auto; font-weight: bold; font-size: 0.85em; }
   </style>
 </head>
 <body>
@@ -28,9 +28,9 @@
     <strong>Fondo:</strong>
     <input id="xyzUrl" type="text" value="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
     <button id="btnAplicar">Aplicar</button>
-    <button id="btnSubirKml" class="secondary">📁 Subir KML</button>
-    <button id="btnDescargar" class="secondary">Descargar GeoJSON</button>
-    <input type="file" id="fileInput" accept=".kml" style="display:none" />
+    <button id="btnSubirKml" style="background-color: #28a745; border-color: #28a745;">📁 Cargar y Compartir KML</button>
+    <button id="btnDescargar" class="secondary">Descargar Todo</button>
+    <input type="file" id="fileInput" accept=".kml,application/vnd.google-earth.kml+xml,.xml" style="display:none" />
     <span class="coords" id="coords">Lat/Lon: —</span>
   </div>
 
@@ -44,7 +44,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js";
     import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
 
-    // Credenciales integradas de tu proyecto Pucobre
     const firebaseConfig = {
       apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
       authDomain: "gis-pucobre.firebaseapp.com",
@@ -61,26 +60,23 @@
 
     const miNombre = prompt("Nombre del Operador:") || "Anónimo";
 
-    // Inicializar Mapa
     const map = L.map('map').setView([-27.366, -70.332], 15);
     const drawnItems = new L.FeatureGroup().addTo(map);
 
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Esri World Imagery'
+      attribution: 'Pucobre - Esri'
     }).addTo(map);
 
-    const drawControl = new L.Control.Draw({
+    new L.Control.Draw({
       edit: { featureGroup: drawnItems, remove: true },
       draw: { circlemarker: false, circle: false }
     }).addTo(map);
 
-    // --- ACCIÓN: GUARDAR DIBUJO ---
+    // GUARDAR DIBUJOS MANUALES
     map.on(L.Draw.Event.CREATED, async (e) => {
       const layer = e.layer;
       const geojson = layer.toGeoJSON();
-      
-      // Quitamos la capa local para que no se duplique cuando Firebase la devuelva
-      map.removeLayer(layer); 
+      map.removeLayer(layer); // Evita duplicado visual antes de que llegue de la nube
 
       try {
         await addDoc(dibujosRef, {
@@ -88,10 +84,10 @@
           autor: miNombre,
           fecha: new Date().toLocaleString('es-CL')
         });
-      } catch (err) { console.error("Error Firebase:", err); }
+      } catch (err) { console.error(err); }
     });
 
-    // --- ACCIÓN: BORRAR DIBUJO ---
+    // BORRAR DIBUJOS (SINCRONIZADO)
     map.on(L.Draw.Event.DELETED, (e) => {
       e.layers.eachLayer(async (layer) => {
         if (layer.options.firebaseId) {
@@ -100,16 +96,14 @@
       });
     });
 
-    // --- SINCRONIZACIÓN (FIJA: NO SE BORRAN LOS DIBUJOS) ---
+    // SINCRONIZACIÓN EN TIEMPO REAL
     onSnapshot(dibujosRef, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         const id = change.doc.id;
         if (change.type === "added") {
-          // Evitar duplicados
-          let yaExiste = false;
-          drawnItems.eachLayer(l => { if(l.options.firebaseId === id) yaExiste = true; });
-          
-          if (!yaExiste) {
+          let existe = false;
+          drawnItems.eachLayer(l => { if(l.options.firebaseId === id) existe = true; });
+          if (!existe) {
             const data = change.doc.data();
             L.geoJSON(data.feature, {
               onEachFeature: (f, l) => {
@@ -121,58 +115,49 @@
           }
         }
         if (change.type === "removed") {
-          drawnItems.eachLayer((l) => {
-            if (l.options.firebaseId === id) drawnItems.removeLayer(l);
-          });
+          drawnItems.eachLayer(l => { if (l.options.firebaseId === id) drawnItems.removeLayer(l); });
         }
       });
     });
 
-    // --- FUNCIÓN: SUBIR KML ---
+    // LÓGICA DE SUBIDA DE KML
     const fileInput = document.getElementById('fileInput');
     document.getElementById('btnSubirKml').onclick = () => fileInput.click();
 
     fileInput.onchange = function(e) {
       const file = e.target.files[0];
       if (!file) return;
+
       const reader = new FileReader();
       reader.onload = (event) => {
-        const kmlLayer = omnivore.kml.parse(event.target.result);
-        kmlLayer.on('ready', () => {
-          map.fitBounds(kmlLayer.getBounds());
-          kmlLayer.eachLayer(layer => {
-            // Esto los sube automáticamente a Firebase para que todos los vean
-            const geojson = layer.toGeoJSON();
-            addDoc(dibujosRef, {
-              feature: geojson,
-              autor: miNombre + " (via KML)",
-              fecha: new Date().toLocaleString('es-CL')
+        try {
+          const kmlData = event.target.result;
+          const kmlLayer = omnivore.kml.parse(kmlData);
+          
+          kmlLayer.on('ready', () => {
+            // Zoom automático a los datos del KML
+            map.fitBounds(kmlLayer.getBounds());
+            
+            // Subir cada elemento del KML a la base de datos
+            kmlLayer.eachLayer(layer => {
+              addDoc(dibujosRef, {
+                feature: layer.toGeoJSON(),
+                autor: miNombre + " (Importado KML)",
+                fecha: new Date().toLocaleString('es-CL')
+              });
             });
+            alert("Archivo KML cargado y sincronizado con el equipo.");
           });
-          alert("KML Sincronizado");
-        });
+        } catch (err) {
+          alert("Error al leer el KML. Asegúrate de que sea un archivo válido.");
+        }
       };
       reader.readAsText(file);
     };
 
-    // Coordenadas y Utilidades
     map.on('mousemove', e => {
       document.getElementById('coords').textContent = `Lat/Lon: ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
     });
-
-    document.getElementById('btnDescargar').onclick = () => {
-      const data = drawnItems.toGeoJSON();
-      const blob = new Blob([JSON.stringify(data)], {type: 'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `pucobre_export.geojson`;
-      a.click();
-    };
-
-    document.getElementById('btnAplicar').onclick = () => {
-      const url = document.getElementById('xyzUrl').value;
-      if (url) L.tileLayer(url).addTo(map);
-    };
   </script>
 </body>
 </html>
