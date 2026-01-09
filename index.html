@@ -4,8 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GIS Colaborativo - Pucobre</title>
+  
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  
   <style>
     html, body { height: 100%; margin: 0; }
     #map { height: calc(100vh - 84px); }
@@ -14,30 +16,35 @@
       padding: 10px; border-bottom: 1px solid #e0e0e0; font-family: system-ui, Arial;
       background: #fafafa;
     }
-    .toolbar input[type=text] { width: 400px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+    .toolbar input[type=text] { width: 350px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
     .toolbar button { padding: 6px 10px; border: 1px solid #2c7be5; background: #2c7be5; color: #fff; border-radius: 4px; cursor: pointer; }
     .toolbar button.secondary { border-color: #666; background: #f5f5f5; color: #333; }
-    .coords { margin-left: auto; font-weight: bold; }
+    .coords { margin-left: auto; font-weight: bold; font-size: 0.9em; }
   </style>
 </head>
 <body>
+
   <div class="toolbar">
-    <strong>Fondo XYZ:</strong>
+    <strong>Fondo:</strong>
     <input id="xyzUrl" type="text" value="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
     <button id="btnAplicar">Aplicar</button>
+    <button id="btnSubirKml" class="secondary">📁 Subir KML</button>
     <button id="btnDescargar" class="secondary">Descargar GeoJSON</button>
-    <button id="btnLimpiar" class="secondary">Limpiar Vista Local</button>
+    <input type="file" id="fileInput" accept=".kml" style="display:none" />
     <span class="coords" id="coords">Lat/Lon: —</span>
   </div>
+
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="https://api.tiles.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js";
     import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
 
+    // Credenciales integradas de tu proyecto Pucobre
     const firebaseConfig = {
       apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
       authDomain: "gis-pucobre.firebaseapp.com",
@@ -52,8 +59,9 @@
     const db = getFirestore(app);
     const dibujosRef = collection(db, "geometrias");
 
-    const miNombre = prompt("Identifícate para colaborar:") || "Anónimo";
+    const miNombre = prompt("Nombre del Operador:") || "Anónimo";
 
+    // Inicializar Mapa
     const map = L.map('map').setView([-27.366, -70.332], 15);
     const drawnItems = new L.FeatureGroup().addTo(map);
 
@@ -63,54 +71,45 @@
 
     const drawControl = new L.Control.Draw({
       edit: { featureGroup: drawnItems, remove: true },
-      draw: { circlemarker: false }
+      draw: { circlemarker: false, circle: false }
     }).addTo(map);
 
-    // --- LÓGICA DE GUARDADO ---
+    // --- ACCIÓN: GUARDAR DIBUJO ---
     map.on(L.Draw.Event.CREATED, async (e) => {
       const layer = e.layer;
       const geojson = layer.toGeoJSON();
       
-      // Removemos la capa local inmediatamente para evitar la "doble vista"
-      // Firebase la volverá a pintar en un milisegundo con su ID real
+      // Quitamos la capa local para que no se duplique cuando Firebase la devuelva
       map.removeLayer(layer); 
 
       try {
         await addDoc(dibujosRef, {
           feature: geojson,
           autor: miNombre,
-          fecha: new Date().toLocaleString('es-CL'),
-          clientToken: Math.random().toString(36).substring(7) // Identificador único de sesión
+          fecha: new Date().toLocaleString('es-CL')
         });
-      } catch (err) {
-        console.error("Error al guardar:", err);
-      }
+      } catch (err) { console.error("Error Firebase:", err); }
     });
 
-    // --- LÓGICA DE BORRADO ---
+    // --- ACCIÓN: BORRAR DIBUJO ---
     map.on(L.Draw.Event.DELETED, (e) => {
       e.layers.eachLayer(async (layer) => {
         if (layer.options.firebaseId) {
-          try {
-            await deleteDoc(doc(db, "geometrias", layer.options.firebaseId));
-          } catch (err) {
-            console.error("Error al borrar:", err);
-          }
+          await deleteDoc(doc(db, "geometrias", layer.options.firebaseId));
         }
       });
     });
 
-    // --- SINCRONIZACIÓN CORREGIDA ---
+    // --- SINCRONIZACIÓN (FIJA: NO SE BORRAN LOS DIBUJOS) ---
     onSnapshot(dibujosRef, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         const id = change.doc.id;
-
         if (change.type === "added") {
-          // Verificamos si ya existe en pantalla para no duplicar
-          let existe = false;
-          drawnItems.eachLayer(l => { if(l.options.firebaseId === id) existe = true; });
-
-          if (!existe) {
+          // Evitar duplicados
+          let yaExiste = false;
+          drawnItems.eachLayer(l => { if(l.options.firebaseId === id) yaExiste = true; });
+          
+          if (!yaExiste) {
             const data = change.doc.data();
             L.geoJSON(data.feature, {
               onEachFeature: (f, l) => {
@@ -121,40 +120,59 @@
             });
           }
         }
-        
         if (change.type === "removed") {
-          drawnItems.eachLayer((layer) => {
-            if (layer.options.firebaseId === id) {
-              drawnItems.removeLayer(layer);
-            }
+          drawnItems.eachLayer((l) => {
+            if (l.options.firebaseId === id) drawnItems.removeLayer(l);
           });
         }
       });
     });
 
-    // --- FUNCIONES EXTRA ---
+    // --- FUNCIÓN: SUBIR KML ---
+    const fileInput = document.getElementById('fileInput');
+    document.getElementById('btnSubirKml').onclick = () => fileInput.click();
+
+    fileInput.onchange = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const kmlLayer = omnivore.kml.parse(event.target.result);
+        kmlLayer.on('ready', () => {
+          map.fitBounds(kmlLayer.getBounds());
+          kmlLayer.eachLayer(layer => {
+            // Esto los sube automáticamente a Firebase para que todos los vean
+            const geojson = layer.toGeoJSON();
+            addDoc(dibujosRef, {
+              feature: geojson,
+              autor: miNombre + " (via KML)",
+              fecha: new Date().toLocaleString('es-CL')
+            });
+          });
+          alert("KML Sincronizado");
+        });
+      };
+      reader.readAsText(file);
+    };
+
+    // Coordenadas y Utilidades
     map.on('mousemove', e => {
       document.getElementById('coords').textContent = `Lat/Lon: ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
     });
 
-    document.getElementById('btnDescargar').addEventListener('click', () => {
+    document.getElementById('btnDescargar').onclick = () => {
       const data = drawnItems.toGeoJSON();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(data)], {type: 'application/json'});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `gis_pucobre.geojson`;
+      a.download = `pucobre_export.geojson`;
       a.click();
-    });
+    };
 
-    document.getElementById('btnAplicar').addEventListener('click', () => {
-      const url = document.getElementById('xyzUrl').value.trim();
+    document.getElementById('btnAplicar').onclick = () => {
+      const url = document.getElementById('xyzUrl').value;
       if (url) L.tileLayer(url).addTo(map);
-    });
-
-    document.getElementById('btnLimpiar').addEventListener('click', () => {
-      // OJO: Esto solo limpia tu pantalla temporalmente, al haber un cambio en Firebase volverán a aparecer.
-      drawnItems.clearLayers();
-    });
+    };
   </script>
 </body>
 </html>
