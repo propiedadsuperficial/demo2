@@ -170,64 +170,64 @@
       document.getElementById('status').textContent = '❌ Desconectado';
     });
 
-    // Importación KML - FIX: Ahora muestra correctamente el KML
+    // Importación KML - FIX: Carga correcta usando Blob URL
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const kmlText = event.target.result;
+      // Crear URL temporal del archivo
+      const blobUrl = URL.createObjectURL(file);
+      
+      try {
+        // Parsear KML desde URL usando omnivore
+        const kmlLayer = omnivore.kml(blobUrl);
+        
+        kmlLayer.on('ready', function() {
+          // Liberar URL temporal
+          URL.revokeObjectURL(blobUrl);
           
-          // Parsear KML usando omnivore
-          const kmlLayer = omnivore.kml.parse(kmlText);
+          // Ajustar vista al contenido del KML
+          const bounds = kmlLayer.getBounds();
+          if (bounds.isValid()) {
+            map.fitBounds(bounds);
+          }
           
-          kmlLayer.on('ready', function() {
-            // Ajustar vista al contenido del KML
-            if (kmlLayer.getBounds().isValid()) {
-              map.fitBounds(kmlLayer.getBounds());
+          let count = 0;
+          // Agregar cada capa al grupo de borradores locales
+          kmlLayer.eachLayer(layer => {
+            // Aplicar estilo naranja para indicar que está pendiente de guardar
+            if (layer.setStyle) {
+              layer.setStyle({ 
+                color: '#f39c12', 
+                weight: 4,
+                fillOpacity: 0.3 
+              });
             }
-            
-            // Agregar cada capa al grupo de borradores locales
-            kmlLayer.eachLayer(layer => {
-              // Aplicar estilo naranja para indicar que está pendiente de guardar
-              if (layer.setStyle) {
-                layer.setStyle({ 
-                  color: '#f39c12', 
-                  weight: 4,
-                  fillOpacity: 0.3 
-                });
-              }
-              localDrafts.addLayer(layer);
-              pendingChanges++;
-            });
-            
-            updateSaveButton();
-            document.getElementById('status').textContent = `✓ KML cargado (${pendingChanges} elementos)`;
-            
-            // Resetear después de 3 segundos
-            setTimeout(() => {
-              document.getElementById('status').textContent = '📡 En línea';
-            }, 3000);
+            localDrafts.addLayer(layer);
+            count++;
           });
+          
+          pendingChanges += count;
+          updateSaveButton();
+          document.getElementById('status').textContent = `✓ KML cargado (${count} elementos)`;
+          
+          // Resetear después de 3 segundos
+          setTimeout(() => {
+            document.getElementById('status').textContent = '📡 En línea';
+          }, 3000);
+        });
 
-          kmlLayer.on('error', function(err) {
-            console.error("Error al parsear KML:", err);
-            alert("Error al cargar el archivo KML. Verifica que sea un KML válido.");
-          });
+        kmlLayer.on('error', function(err) {
+          console.error("Error al parsear KML:", err);
+          URL.revokeObjectURL(blobUrl);
+          alert("Error al cargar el archivo KML. Verifica que sea un KML válido.");
+        });
 
-        } catch (err) {
-          console.error("Error procesando KML:", err);
-          alert("No se pudo procesar el archivo KML.");
-        }
-      };
-      
-      reader.onerror = () => {
-        alert("Error al leer el archivo.");
-      };
-      
-      reader.readAsText(file);
+      } catch (err) {
+        console.error("Error procesando KML:", err);
+        URL.revokeObjectURL(blobUrl);
+        alert("No se pudo procesar el archivo KML.");
+      }
       
       // Resetear input para permitir cargar el mismo archivo nuevamente
       e.target.value = '';
