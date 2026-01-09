@@ -4,68 +4,30 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GIS Colaborativo - Pucobre</title>
-  
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-  
   <style>
-    html, body { height: 100%; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    #toolbar { 
-      padding: 10px 15px; 
-      background: #1a1a1a; 
-      color: white; 
-      display: flex; 
-      gap: 12px; 
-      align-items: center; 
-      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-      z-index: 1000;
-    }
+    html, body { height: 100%; margin: 0; font-family: 'Segoe UI', sans-serif; }
+    #toolbar { padding: 10px; background: #2c3e50; color: white; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     #map { width: 100%; height: calc(100% - 60px); }
-    .btn { 
-      padding: 8px 15px; 
-      border: none; 
-      border-radius: 4px; 
-      cursor: pointer; 
-      font-weight: bold; 
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      transition: background 0.2s;
-    }
+    .btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
     .btn-save { background: #27ae60; color: white; }
-    .btn-save:disabled { background: #444; color: #888; cursor: not-allowed; }
-    .btn-save.pending { background: #e74c3c; animation: pulse 1.5s infinite; }
-    .btn-kml { background: #3498db; color: white; }
-    .status-box { margin-left: auto; font-size: 13px; text-align: right; }
-    .status-label { color: #bdc3c7; display: block; font-size: 10px; text-transform: uppercase; }
-    
-    @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
-      70% { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
-    }
+    .btn-save:disabled { background: #7f8c8d; cursor: not-allowed; }
+    .btn-save.pending { background: #e74c3c; animation: blink 1s infinite; }
+    .btn-secondary { background: #34495e; color: white; border: 1px solid #5d6d7e; }
+    .status { font-size: 12px; color: #bdc3c7; margin-left: auto; }
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
   </style>
 </head>
 <body>
-
   <div id="toolbar">
-    <strong style="color: #f1c40f;">PUCOBRE GIS</strong>
-    
-    <button id="saveBtn" class="btn btn-save" disabled>
-      <span>💾</span> Guardar Cambios
-    </button>
-    
-    <label class="btn btn-kml" for="kmlInput">
-      <span>📁</span> Cargar KML
-    </label>
+    <strong>PUCOBRE GIS</strong>
+    <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
+    <label class="btn btn-secondary" for="kmlInput">📁 Cargar KML</label>
     <input id="kmlInput" type="file" style="display:none" accept=".kml,application/vnd.google-earth.kml+xml" />
-
-    <div class="status-box">
-      <span class="status-label">Estado del Sistema</span>
-      <span id="status">Sincronizado</span>
-    </div>
+    <button id="exportBtn" class="btn btn-secondary">⬇️ Exportar GeoJSON</button>
+    <span id="status" class="status">Cargando...</span>
   </div>
-
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -73,10 +35,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
 
   <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
-    import { getFirestore, doc, setDoc, collection, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
+    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 
-    // Credenciales Reales Pucobre
+    // Credenciales Reales extraídas de tu configuración
     const firebaseConfig = {
       apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
       authDomain: "gis-pucobre.firebaseapp.com",
@@ -88,108 +50,98 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const miNombre = prompt("Identificación del Operador:") || "Operador_Anonimo";
+    const miNombre = prompt("Identificación del Operador:") || "Operador";
 
-    // Configuración del Mapa
+    // Configuración Mapa Satelital
     const map = L.map('map').setView([-27.366, -70.332], 14);
-    
-    // Capa Satelital ESRI
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery | Pucobre'
     }).addTo(map);
 
-    const cloudLayers = L.featureGroup().addTo(map); // Capa oficial (Nube)
-    const localDrafts = L.featureGroup().addTo(map); // Capa borrador (Local)
+    const cloudLayers = L.featureGroup().addTo(map);
+    const localDrafts = L.featureGroup().addTo(map);
 
     const drawControl = new L.Control.Draw({
       edit: { featureGroup: localDrafts },
-      draw: { circle: false, circlemarker: false, marker: true }
+      draw: { circle: false, circlemarker: false }
     }).addTo(map);
 
-    // Gestión de Estados
-    const updateUI = () => {
-      const btn = document.getElementById('saveBtn');
-      const hasChanges = localDrafts.getLayers().length > 0;
-      btn.disabled = !hasChanges;
-      if(hasChanges) {
-        btn.classList.add('pending');
-        document.getElementById('status').textContent = 'Cambios pendientes';
-      } else {
-        btn.classList.remove('pending');
-        document.getElementById('status').textContent = 'Sincronizado';
-      }
-    };
-
-    // Al Dibujar: Añadir a Borradores
+    // Detección de cambios locales
     map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
-      layer.setStyle({ color: '#e74c3c', dashArray: '5, 10' }); // Estilo visual de borrador
+      layer.setStyle({ color: '#e74c3c', dashArray: '5, 10' }); // Rojo intermitente para borrador
       localDrafts.addLayer(layer);
-      updateUI();
+      document.getElementById('saveBtn').disabled = false;
+      document.getElementById('saveBtn').classList.add('pending');
+      document.getElementById('status').textContent = 'Tienes cambios locales';
     });
 
-    // Guardar: Subir borradores a Firebase
-    document.getElementById('saveBtn').addEventListener('click', async () => {
+    // Guardado Manual (Disquete)
+    document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       btn.disabled = true;
       btn.textContent = "⌛ Guardando...";
 
-      const promises = [];
+      const batch = [];
       localDrafts.eachLayer(layer => {
-        const docId = crypto.randomUUID();
-        promises.push(setDoc(doc(db, 'geometrias', docId), {
+        batch.push(addDoc(collection(db, "geometrias"), {
           feature: layer.toGeoJSON(),
           autor: miNombre,
           fecha: new Date().toLocaleString('es-CL'),
-          serverTime: serverTimestamp()
+          timestamp: serverTimestamp()
         }));
       });
 
       try {
-        await Promise.all(promises);
+        await Promise.all(batch);
         localDrafts.clearLayers();
         btn.textContent = "💾 Guardar Cambios";
-        updateUI();
-        alert("¡Datos guardados correctamente en la nube!");
+        btn.classList.remove('pending');
+        alert("¡Sincronización exitosa!");
       } catch (err) {
-        alert("Error de conexión. Intente nuevamente.");
+        alert("Error al conectar con Firebase.");
         btn.disabled = false;
       }
-    });
+    };
 
-    // Sincronización en Tiempo Real (Lectura)
-    onSnapshot(collection(db, 'geometrias'), (snapshot) => {
+    // Lectura en tiempo real
+    onSnapshot(collection(db, "geometrias"), (snapshot) => {
       cloudLayers.clearLayers();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         L.geoJSON(data.feature, {
-          style: { color: '#3498db', weight: 3 },
           onEachFeature: (f, l) => {
-            l.bindPopup(`<b>Operador:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
+            l.bindPopup(`<b>Autor:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
           }
         }).addTo(cloudLayers);
       });
+      document.getElementById('status').textContent = 'Sincronizado';
     });
 
-    // Cargar KML (Importa como borrador local)
-    document.getElementById('kmlInput').addEventListener('change', (ev) => {
-      const file = ev.target.files[0];
-      if (!file) return;
-
+    // Cargar KML
+    document.getElementById('kmlInput').onchange = (e) => {
       const reader = new FileReader();
       reader.onload = () => {
         const kmlLayer = omnivore.kml.parse(reader.result);
         kmlLayer.on('ready', () => {
           map.fitBounds(kmlLayer.getBounds());
-          kmlLayer.eachLayer(l => {
-            if(l.setStyle) l.setStyle({ color: '#e74c3c', dashArray: '5, 10' });
-            localDrafts.addLayer(l);
-          });
-          updateUI();
+          kmlLayer.eachLayer(l => localDrafts.addLayer(l));
+          document.getElementById('saveBtn').disabled = false;
+          document.getElementById('saveBtn').classList.add('pending');
         });
       };
-      reader.readAsText(file);
-    });
+      reader.readAsText(e.target.files[0]);
+    };
+
+    // Exportar
+    document.getElementById('exportBtn').onclick = () => {
+      const data = cloudLayers.toGeoJSON();
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pucobre_export.geojson`;
+      a.click();
+    };
   </script>
 </body>
 </html>
