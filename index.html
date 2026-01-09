@@ -4,324 +4,191 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GIS Colaborativo - Pucobre</title>
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-o9N1j8Mk3CwZ9G6M3G3Z2rVZ9VgV7rCw540GlbYwE0Y=" crossorigin="anonymous" />
-  <!-- Leaflet.draw CSS -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" integrity="sha512-2NhgacW+XyW0wGJwVQx8WmYQF2aqV2yGkJqkQFeSSqJYpGqmG3O3o3o5o5WkV1lV+7CkW0ZQCwTiOGX3ovSxXw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  
   <style>
-    html, body { height: 100%; margin: 0; }
-    #toolbar { padding: 8px; background: #f5f5f7; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #ddd; }
-    #map { width: 100%; height: calc(100% - 56px); }
-    .spacer { flex: 1; }
-    .status { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 13px; color: #555; }
-    .btn { padding: 6px 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 4px; }
-    .btn:hover { background: #f0f0f0; }
-    .latlon { min-width: 180px; text-align: right; }
+    html, body { height: 100%; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #toolbar { 
+      padding: 10px 15px; 
+      background: #1a1a1a; 
+      color: white; 
+      display: flex; 
+      gap: 12px; 
+      align-items: center; 
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
+    #map { width: 100%; height: calc(100% - 60px); }
+    .btn { 
+      padding: 8px 15px; 
+      border: none; 
+      border-radius: 4px; 
+      cursor: pointer; 
+      font-weight: bold; 
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.2s;
+    }
+    .btn-save { background: #27ae60; color: white; }
+    .btn-save:disabled { background: #444; color: #888; cursor: not-allowed; }
+    .btn-save.pending { background: #e74c3c; animation: pulse 1.5s infinite; }
+    .btn-kml { background: #3498db; color: white; }
+    .status-box { margin-left: auto; font-size: 13px; text-align: right; }
+    .status-label { color: #bdc3c7; display: block; font-size: 10px; text-transform: uppercase; }
+    
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+    }
   </style>
 </head>
 <body>
+
   <div id="toolbar">
-    <strong>GIS Colaborativo — Pucobre</strong>
-    <div class="spacer"></div>
-    <label class="btn" for="kmlInput">📁 Cargar KML</label>
-    <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
-    <button id="exportBtn" class="btn">⬇️ Exportar GeoJSON</button>
-    <span id="status" class="status">Sincronizando…</span>
-    <span id="latlon" class="status latlon">Lat/Lon: —</span>
+    <strong style="color: #f1c40f;">PUCOBRE GIS</strong>
+    
+    <button id="saveBtn" class="btn btn-save" disabled>
+      <span>💾</span> Guardar Cambios
+    </button>
+    
+    <label class="btn btn-kml" for="kmlInput">
+      <span>📁</span> Cargar KML
+    </label>
+    <input id="kmlInput" type="file" style="display:none" accept=".kml,application/vnd.google-earth.kml+xml" />
+
+    <div class="status-box">
+      <span class="status-label">Estado del Sistema</span>
+      <span id="status">Sincronizado</span>
+    </div>
   </div>
+
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o8QWq1iIuP89xDSHLVQQP4SRrped1IovnEuh3rW0C2k=" crossorigin="anonymous"></script>
-  <!-- Leaflet.draw JS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js" integrity="sha512-6kYUpwKx5Qw3y4Zf8Kk1r2UuK2zWJYw3kO4S9v0aCwPpVvV1Qy1QWkB8rQkD9O8u7jYJj2iC6uQzEoKp8R7C0g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <!-- Leaflet-Omnivore (KML parser) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" integrity="sha512-+VQeX6rOe2pHkFfCqfF7N3T3U0m7oXKQFQvH1vYF8Y0qLQwVYQnQmPZp1mYl3F1EwJ9kNwFjVf3q8x3tYxQy2ZA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
 
-  <!-- Firebase v9 (Modular) -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
-    import { getFirestore, doc, setDoc, deleteDoc, serverTimestamp, collection, query, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
-    import { getAuth } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
+    import { getFirestore, doc, setDoc, collection, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
 
-    // TODO: Reemplaza con tu configuración de Firebase
+    // Credenciales Reales Pucobre
     const firebaseConfig = {
-      apiKey: "TU_API_KEY",
-      authDomain: "TU_AUTH_DOMAIN",
-      projectId: "TU_PROJECT_ID",
-      storageBucket: "TU_STORAGE_BUCKET",
-      messagingSenderId: "TU_SENDER_ID",
-      appId: "TU_APP_ID"
+      apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
+      authDomain: "gis-pucobre.firebaseapp.com",
+      projectId: "gis-pucobre",
+      storageBucket: "gis-pucobre.appspot.com",
+      messagingSenderId: "654550355942",
+      appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const auth = getAuth(app);
+    const miNombre = prompt("Identificación del Operador:") || "Operador_Anonimo";
 
-    // === Inicializar Leaflet ===
-    const map = L.map('map', { zoomControl: true }).setView([-27.366, -70.333], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+    // Configuración del Mapa
+    const map = L.map('map').setView([-27.366, -70.332], 14);
+    
+    // Capa Satelital ESRI
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Esri World Imagery | Pucobre'
     }).addTo(map);
 
-    // Grupo de edición y control de dibujo
-    const drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);
+    const cloudLayers = L.featureGroup().addTo(map); // Capa oficial (Nube)
+    const localDrafts = L.featureGroup().addTo(map); // Capa borrador (Local)
+
     const drawControl = new L.Control.Draw({
-      edit: { featureGroup: drawnItems },
-      draw: {
-        circle: false,
-        circlemarker: false
+      edit: { featureGroup: localDrafts },
+      draw: { circle: false, circlemarker: false, marker: true }
+    }).addTo(map);
+
+    // Gestión de Estados
+    const updateUI = () => {
+      const btn = document.getElementById('saveBtn');
+      const hasChanges = localDrafts.getLayers().length > 0;
+      btn.disabled = !hasChanges;
+      if(hasChanges) {
+        btn.classList.add('pending');
+        document.getElementById('status').textContent = 'Cambios pendientes';
+      } else {
+        btn.classList.remove('pending');
+        document.getElementById('status').textContent = 'Sincronizado';
       }
-    });
-    map.addControl(drawControl);
+    };
 
-    // Registro local de capas para evitar duplicados (docId -> L.Layer)
-    const layerRegistry = new Map();
-    
-    // Set para rastrear IDs locales pendientes de confirmación
-    const pendingLocalIds = new Set();
-
-    // Mostrar Lat/Lon del mouse
-    map.on('mousemove', (e) => {
-      const { lat, lng } = e.latlng;
-      document.getElementById('latlon').textContent = `Lat/Lon: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    });
-
-    // === Helpers ===
-    function upsertLayerFromDoc(docSnap) {
-      const id = docSnap.id;
-      const data = docSnap.data();
-      const geojson = data?.geojson;
-      if (!geojson) return;
-
-      const existing = layerRegistry.get(id);
-      if (existing) {
-        drawnItems.removeLayer(existing);
-        map.removeLayer(existing);
-      }
-      
-      const layer = L.geoJSON(geojson);
-      drawnItems.addLayer(layer);
-      layerRegistry.set(id, layer);
-    }
-
-    // Persistir creación local de dibujos
-    map.on(L.Draw.Event.CREATED, async (e) => {
+    // Al Dibujar: Añadir a Borradores
+    map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
-      const geojson = layer.toGeoJSON();
-      const docId = crypto.randomUUID();
+      layer.setStyle({ color: '#e74c3c', dashArray: '5, 10' }); // Estilo visual de borrador
+      localDrafts.addLayer(layer);
+      updateUI();
+    });
 
-      // Añadir localmente primero (feedback instantáneo)
-      drawnItems.addLayer(layer);
-      layerRegistry.set(docId, layer);
-      pendingLocalIds.add(docId);
+    // Guardar: Subir borradores a Firebase
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      btn.textContent = "⌛ Guardando...";
+
+      const promises = [];
+      localDrafts.eachLayer(layer => {
+        const docId = crypto.randomUUID();
+        promises.push(setDoc(doc(db, 'geometrias', docId), {
+          feature: layer.toGeoJSON(),
+          autor: miNombre,
+          fecha: new Date().toLocaleString('es-CL'),
+          serverTime: serverTimestamp()
+        }));
+      });
 
       try {
-        await setDoc(doc(db, 'features', docId), {
-          geojson,
-          createdAt: serverTimestamp(),
-          createdBy: auth.currentUser?.uid ?? null
-        });
-        
-        // Marcar como confirmado después de guardar
-        pendingLocalIds.delete(docId);
+        await Promise.all(promises);
+        localDrafts.clearLayers();
+        btn.textContent = "💾 Guardar Cambios";
+        updateUI();
+        alert("¡Datos guardados correctamente en la nube!");
       } catch (err) {
-        console.error('Error guardando dibujo:', err);
-        // En caso de error, remover la capa local
-        drawnItems.removeLayer(layer);
-        layerRegistry.delete(docId);
-        pendingLocalIds.delete(docId);
-        alert('Error al guardar el dibujo. Por favor intente nuevamente.');
+        alert("Error de conexión. Intente nuevamente.");
+        btn.disabled = false;
       }
     });
 
-    // Persistir edición local
-    map.on(L.Draw.Event.EDITED, async (e) => {
-      const layers = e.layers;
-      layers.eachLayer(async (layer) => {
-        const entry = [...layerRegistry.entries()].find(([, l]) => l === layer);
-        if (entry) {
-          const [docId] = entry;
-          const geojson = layer.toGeoJSON();
-          try {
-            await setDoc(doc(db, 'features', docId), {
-              geojson,
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          } catch (err) {
-            console.error('Error actualizando dibujo:', err);
+    // Sincronización en Tiempo Real (Lectura)
+    onSnapshot(collection(db, 'geometrias'), (snapshot) => {
+      cloudLayers.clearLayers();
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        L.geoJSON(data.feature, {
+          style: { color: '#3498db', weight: 3 },
+          onEachFeature: (f, l) => {
+            l.bindPopup(`<b>Operador:</b> ${data.autor}<br><b>Fecha:</b> ${data.fecha}`);
           }
-        }
+        }).addTo(cloudLayers);
       });
     });
 
-    // Persistir eliminación local
-    map.on(L.Draw.Event.DELETED, async (e) => {
-      const layers = e.layers;
-      layers.eachLayer(async (layer) => {
-        const entry = [...layerRegistry.entries()].find(([, l]) => l === layer);
-        if (entry) {
-          const [docId] = entry;
-          layerRegistry.delete(docId);
-          pendingLocalIds.delete(docId);
-          try {
-            await deleteDoc(doc(db, 'features', docId));
-          } catch (err) {
-            console.error('Error eliminando dibujo:', err);
-          }
-        }
-      });
-    });
-
-    // Listener en tiempo real con manejo correcto de added/modified/removed
-    const q = query(collection(db, 'features'));
-    onSnapshot(q, (snapshot) => {
-      document.getElementById('status').textContent = 'Conectado';
-
-      snapshot.docChanges().forEach((change) => {
-        const docSnap = change.doc;
-        const docId = docSnap.id;
-
-        // Ignorar cambios locales que aún no se han confirmado
-        if (pendingLocalIds.has(docId)) {
-          return;
-        }
-
-        switch (change.type) {
-          case 'added':
-            // Solo agregar si no existe localmente
-            if (!layerRegistry.has(docId)) {
-              upsertLayerFromDoc(docSnap);
-            }
-            break;
-            
-          case 'modified':
-            // Actualizar la capa existente
-            upsertLayerFromDoc(docSnap);
-            break;
-            
-          case 'removed':
-            // Remover del mapa y del registro
-            const layer = layerRegistry.get(docId);
-            if (layer) {
-              drawnItems.removeLayer(layer);
-              map.removeLayer(layer);
-              layerRegistry.delete(docId);
-            }
-            break;
-        }
-      });
-    }, (error) => {
-      console.error('onSnapshot error:', error);
-      document.getElementById('status').textContent = 'Desconectado';
-    });
-
-    // === Importación KML ===
-    const kmlInput = document.getElementById('kmlInput');
-    kmlInput.addEventListener('change', async (ev) => {
-      const file = ev.target.files?.[0];
+    // Cargar KML (Importa como borrador local)
+    document.getElementById('kmlInput').addEventListener('change', (ev) => {
+      const file = ev.target.files[0];
       if (!file) return;
-      
-      const name = file.name.toLowerCase();
-
-      if (!name.endsWith('.kml') && !name.endsWith('.kmz')) {
-        alert('Seleccione un archivo .kml o .kmz');
-        kmlInput.value = '';
-        return;
-      }
-
-      if (name.endsWith('.kmz')) {
-        alert('KMZ no se procesa en este ejemplo. Descomprima el KMZ y cargue el KML interno.');
-        kmlInput.value = '';
-        return;
-      }
 
       const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const kmlText = reader.result;
-          const kmlLayer = omnivore.kml.parse(kmlText);
-          
-          kmlLayer.on('ready', async () => {
-            const gj = kmlLayer.toGeoJSON();
-            const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
-            const batchId = crypto.randomUUID();
-            
-            for (const f of features) {
-              const docId = crypto.randomUUID();
-              const tempLayer = L.geoJSON(f);
-              
-              drawnItems.addLayer(tempLayer);
-              layerRegistry.set(docId, tempLayer);
-              pendingLocalIds.add(docId);
-              
-              try {
-                await setDoc(doc(db, 'features', docId), {
-                  geojson: f,
-                  importedAt: serverTimestamp(),
-                  batchId,
-                  source: 'kml'
-                });
-                pendingLocalIds.delete(docId);
-              } catch (err) {
-                console.error('Error importando feature:', err);
-                drawnItems.removeLayer(tempLayer);
-                layerRegistry.delete(docId);
-                pendingLocalIds.delete(docId);
-              }
-            }
-            
-            document.getElementById('status').textContent = `Importados ${features.length} elementos`;
-            setTimeout(() => {
-              document.getElementById('status').textContent = 'Conectado';
-            }, 3000);
+      reader.onload = () => {
+        const kmlLayer = omnivore.kml.parse(reader.result);
+        kmlLayer.on('ready', () => {
+          map.fitBounds(kmlLayer.getBounds());
+          kmlLayer.eachLayer(l => {
+            if(l.setStyle) l.setStyle({ color: '#e74c3c', dashArray: '5, 10' });
+            localDrafts.addLayer(l);
           });
-          
-          kmlLayer.on('error', (err) => {
-            console.error('Error parseando KML:', err);
-            alert('No se pudo procesar el archivo KML.');
-          });
-          
-        } catch (err) {
-          console.error('Error importando KML:', err);
-          alert('No se pudo procesar el KML.');
-        }
+          updateUI();
+        });
       };
-      
-      reader.onerror = () => {
-        alert('Error al leer el archivo.');
-      };
-      
       reader.readAsText(file);
-      kmlInput.value = '';
-    });
-
-    // === Exportación a GeoJSON ===
-    document.getElementById('exportBtn').addEventListener('click', () => {
-      const features = [];
-      layerRegistry.forEach((layer, id) => {
-        const gj = layer.toGeoJSON();
-        function pushFeature(f) {
-          f.properties = { ...(f.properties || {}), id };
-          features.push(f);
-        }
-        if (gj.type === 'Feature') {
-          pushFeature(gj);
-        } else if (gj.type === 'FeatureCollection') {
-          gj.features.forEach(pushFeature);
-        }
-      });
-      
-      const fc = { type: 'FeatureCollection', features };
-      const blob = new Blob([JSON.stringify(fc, null, 2)], { type: 'application/geo+json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `pucobre_${new Date().toISOString().split('T')[0]}.geojson`;
-      a.click();
-      URL.revokeObjectURL(url);
     });
   </script>
 </body>
