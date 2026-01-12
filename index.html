@@ -63,7 +63,7 @@
       appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
     };
 
-    // Solicitar correo al INICIO de la sesión
+    // 1. SOLICITUD OBLIGATORIA DE CORREO AL INICIO
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     let userEmail = prompt("Sesión de GIS Pucobre. Ingrese su correo institucional para continuar:");
 
@@ -72,6 +72,7 @@
       window.location.reload();
     }
 
+    // Inicialización Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
@@ -87,6 +88,7 @@
     }
     document.getElementById('debugToggle').onclick = () => debugPanel.classList.toggle('active');
 
+    // Mapa Base
     const map = L.map('map').setView([-27.366, -70.332], 14);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery'
@@ -96,6 +98,7 @@
     const localDrafts = L.featureGroup().addTo(map);
     let drawControl = null;
 
+    // 2. FUNCIÓN DE CONTROLES: Ahora se llama independientemente del estado de red
     function initMapControls() {
       if (drawControl) map.removeControl(drawControl);
       drawControl = new L.Control.Draw({
@@ -109,8 +112,13 @@
         }
       });
       map.addControl(drawControl);
+      debugLog("Controles de dibujo inicializados.", "success");
     }
 
+    // Inicializar controles de inmediato tras validar el correo
+    initMapControls();
+
+    // Gestión de Identidad
     onAuthStateChanged(auth, (user) => {
       if (user) {
         currentUser = user;
@@ -119,36 +127,45 @@
           ${isSuperuser ? '<span class="badge badge-admin">SUPERUSER</span>' : '<span class="badge badge-user">EDITOR</span>'}
           <span style="font-size:12px; color:#ecf0f1; margin-left:5px">${userEmail.toLowerCase()}</span>
         `;
-        initMapControls();
+        debugLog(`Conectado a Firebase como: ${user.uid}`, 'success');
       } else {
-        signInAnonymously(auth);
+        signInAnonymously(auth).catch(err => debugLog(`Error Auth: ${err.code}`, 'error'));
       }
     });
 
+    // Sincronización en tiempo real (Nube -> Mapa)
     onSnapshot(collection(db, COLLECTION_NAME), (snapshot) => {
       cloudLayers.clearLayers();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (!data.feature) return;
         const geojson = L.geoJSON(data.feature, {
-          style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
+          style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
+          pointToLayer: (feat, latlng) => L.marker(latlng)
         });
         geojson.bindPopup(`
           <strong>Responsable:</strong> ${data.autor}<br>
           <strong>Fecha:</strong> ${data.fecha}<hr>
-          ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">Eliminar</button>` : ''}
+          ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">Eliminar</button>` : '<small>Solo admin puede borrar</small>'}
         `);
         geojson.addTo(cloudLayers);
       });
-      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size}`;
+      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size} obj.`;
+    }, (err) => {
+      debugLog(`Error Snapshot: ${err.code}`, 'error');
+      document.getElementById('status').innerHTML = `❌ Error Permisos`;
     });
 
     window.deleteFeature = async (id) => {
       if (confirm("¿Eliminar registro permanente de la nube?")) {
-        await deleteDoc(doc(db, COLLECTION_NAME, id));
+        try {
+          await deleteDoc(doc(db, COLLECTION_NAME, id));
+          debugLog("Registro eliminado de la nube.", "success");
+        } catch (e) { alert("Error al eliminar: " + e.message); }
       }
     };
 
+    // Gestión de Dibujos Locales (Borradores)
     let pendingChanges = 0;
     map.on(L.Draw.Event.CREATED, (e) => {
       localDrafts.addLayer(e.layer);
@@ -164,9 +181,11 @@
     function updateSaveUI() {
       const btn = document.getElementById('saveBtn');
       btn.disabled = (pendingChanges === 0);
+      btn.classList.toggle('pending', pendingChanges > 0);
       btn.innerHTML = pendingChanges > 0 ? `💾 Guardar (${pendingChanges})` : `💾 Guardar Cambios`;
     }
 
+    // Acción de Guardar: Usa el correo capturado al inicio
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const layers = localDrafts.getLayers();
@@ -178,17 +197,18 @@
           await addDoc(collection(db, COLLECTION_NAME), {
             feature: layer.toGeoJSON(),
             autor: userEmail.toLowerCase().trim(),
-            createdBy: currentUser.uid,
+            createdBy: currentUser ? currentUser.uid : 'anon',
             createdAt: serverTimestamp(),
             fecha: new Date().toLocaleString('es-CL')
           });
           localDrafts.removeLayer(layer);
-        } catch (err) { debugLog(`Fallo: ${err.message}`, 'error'); }
+        } catch (err) { debugLog(`Fallo al guardar: ${err.message}`, 'error'); }
       }
       pendingChanges = localDrafts.getLayers().length;
       updateSaveUI();
     };
 
+    // Importación KML
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -196,7 +216,7 @@
       reader.onload = (event) => {
         omnivore.kml.parse(event.target.result).on('ready', function() {
           this.eachLayer(l => {
-            l.setStyle({ color: '#f1c40f' });
+            if (l.setStyle) l.setStyle({ color: '#f1c40f' });
             localDrafts.addLayer(l);
             pendingChanges++;
           });
