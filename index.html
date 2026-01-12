@@ -30,7 +30,7 @@
 <body>
   <div id="toolbar">
     <strong>PUCOBRE GIS</strong>
-    <button id="saveBtn" class="btn btn-save" disabled title="Sincronizar borradores locales con la nube">💾 Guardar Cambios</button>
+    <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
     <label class="btn" style="background:#3498db; color:white" for="kmlInput">📁 Cargar KML</label>
     <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
     <button id="debugToggle" class="btn" style="background:#9b59b6; color:white">🐛 Debug</button>
@@ -51,8 +51,7 @@
     import { getAuth, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
     // === CONFIGURACIÓN ===
-    // REEMPLAZA ESTE UID CON EL QUE OBTENGAS DEL PANEL DEBUG PARA TENER PERMISOS DE BORRADO
-    const SUPERUSER_UID = "PEGAR_AQUI_TU_UID_SI_QUIERES_SER_ADMIN"; 
+    const SUPERUSER_UID = "PEGAR_AQUI_TU_UID"; 
     const COLLECTION_NAME = "geometrias";
 
     const firebaseConfig = {
@@ -64,27 +63,30 @@
       appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
     };
 
+    // Solicitar correo al INICIO de la sesión
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    let userEmail = prompt("Sesión de GIS Pucobre. Ingrese su correo institucional para continuar:");
+
+    if (!userEmail || !emailPattern.test(userEmail)) {
+      alert("Es obligatorio un correo válido para utilizar la herramienta. La página se recargará.");
+      window.location.reload();
+    }
+
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
     let currentUser = null;
     let isSuperuser = false;
 
-    // === DEBUG SYSTEM ===
+    // Debug Panel
     const debugPanel = document.getElementById('debugPanel');
-    let debugMessages = [];
     function debugLog(message, type = 'info') {
       const ts = new Date().toLocaleTimeString();
-      const emojis = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️' };
-      const msg = `${ts} ${emojis[type] || '🔹'} ${message}`;
-      debugMessages.push(`<div>${msg}</div>`);
-      if (debugMessages.length > 50) debugMessages.shift();
-      debugPanel.innerHTML = debugMessages.join('');
+      debugPanel.innerHTML += `<div>${ts} ${type === 'error' ? '❌' : '✅'} ${message}</div>`;
       debugPanel.scrollTop = debugPanel.scrollHeight;
     }
     document.getElementById('debugToggle').onclick = () => debugPanel.classList.toggle('active');
 
-    // === MAP SETUP ===
     const map = L.map('map').setView([-27.366, -70.332], 14);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery'
@@ -94,7 +96,6 @@
     const localDrafts = L.featureGroup().addTo(map);
     let drawControl = null;
 
-    // AHORA LAS HERRAMIENTAS SE INICIALIZAN PARA TODOS
     function initMapControls() {
       if (drawControl) map.removeControl(drawControl);
       drawControl = new L.Control.Draw({
@@ -108,64 +109,46 @@
         }
       });
       map.addControl(drawControl);
-      debugLog("Herramientas de dibujo habilitadas para el usuario.", "success");
     }
 
-    // === AUTHENTICATION ===
     onAuthStateChanged(auth, (user) => {
       if (user) {
         currentUser = user;
         isSuperuser = (user.uid === SUPERUSER_UID);
-        debugLog(`Autenticado: ${user.uid}`, 'success');
-        
-        const badge = isSuperuser ? '<span class="badge badge-admin">SUPERUSER</span>' : '<span class="badge badge-user">EDITOR</span>';
-        document.getElementById('userInfo').innerHTML = `${badge} <small style="color:white">${user.uid.substring(0,6)}...</small>`;
-        
-        initMapControls(); // Habilitar dibujo al conectar
+        document.getElementById('userInfo').innerHTML = `
+          ${isSuperuser ? '<span class="badge badge-admin">SUPERUSER</span>' : '<span class="badge badge-user">EDITOR</span>'}
+          <span style="font-size:12px; color:#ecf0f1; margin-left:5px">${userEmail.toLowerCase()}</span>
+        `;
+        initMapControls();
       } else {
-        signInAnonymously(auth).catch(err => debugLog(`Error Auth: ${err.code}`, 'error'));
+        signInAnonymously(auth);
       }
     });
 
-    // === FIRESTORE REAL-TIME SYNC ===
     onSnapshot(collection(db, COLLECTION_NAME), (snapshot) => {
       cloudLayers.clearLayers();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (!data.feature) return;
-
         const geojson = L.geoJSON(data.feature, {
-          style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
-          pointToLayer: (feat, latlng) => L.marker(latlng)
+          style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
         });
-
-        geojson.bindPopup(() => {
-          const container = document.createElement('div');
-          container.innerHTML = `
-            <strong>Operador:</strong> ${data.autor || 'Anon'}<br>
-            <strong>Fecha:</strong> ${data.fecha || 'Sin fecha'}<hr>
-            ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">🗑 Eliminar Permanente</button>` : '<small>Solo admin puede borrar</small>'}
-          `;
-          return container;
-        });
+        geojson.bindPopup(`
+          <strong>Responsable:</strong> ${data.autor}<br>
+          <strong>Fecha:</strong> ${data.fecha}<hr>
+          ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">Eliminar</button>` : ''}
+        `);
         geojson.addTo(cloudLayers);
       });
-      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size} obj.`;
-    }, (err) => {
-      document.getElementById('status').innerHTML = `❌ Error: ${err.code}`;
-      debugLog(`Error Firestore: ${err.message}`, 'error');
+      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size}`;
     });
 
     window.deleteFeature = async (id) => {
-      if (confirm("¿Eliminar de la nube permanentemente?")) {
-        try {
-          await deleteDoc(doc(db, COLLECTION_NAME, id));
-          debugLog(`Objeto ${id} eliminado.`, 'success');
-        } catch (e) { debugLog(`Error: ${e.message}`, 'error'); }
+      if (confirm("¿Eliminar registro permanente de la nube?")) {
+        await deleteDoc(doc(db, COLLECTION_NAME, id));
       }
     };
 
-    // === DRAW EVENTS & SAVE ===
     let pendingChanges = 0;
     map.on(L.Draw.Event.CREATED, (e) => {
       localDrafts.addLayer(e.layer);
@@ -181,15 +164,12 @@
     function updateSaveUI() {
       const btn = document.getElementById('saveBtn');
       btn.disabled = (pendingChanges === 0);
-      btn.classList.toggle('pending', pendingChanges > 0);
-      btn.innerHTML = pendingChanges > 0 ? `💾 Guardar Cambios (${pendingChanges})` : `💾 Guardar Cambios`;
+      btn.innerHTML = pendingChanges > 0 ? `💾 Guardar (${pendingChanges})` : `💾 Guardar Cambios`;
     }
 
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const layers = localDrafts.getLayers();
-      const operator = prompt("Nombre del operador:", "Colaborador Pucobre") || "Anon";
-      
       btn.disabled = true;
       btn.innerHTML = "⌛ Sincronizando...";
       
@@ -197,28 +177,26 @@
         try {
           await addDoc(collection(db, COLLECTION_NAME), {
             feature: layer.toGeoJSON(),
-            autor: operator,
+            autor: userEmail.toLowerCase().trim(),
             createdBy: currentUser.uid,
             createdAt: serverTimestamp(),
             fecha: new Date().toLocaleString('es-CL')
           });
           localDrafts.removeLayer(layer);
-        } catch (err) { debugLog(`Error al guardar: ${err.message}`, 'error'); }
+        } catch (err) { debugLog(`Fallo: ${err.message}`, 'error'); }
       }
       pendingChanges = localDrafts.getLayers().length;
       updateSaveUI();
     };
 
-    // === KML IMPORT ===
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (event) => {
-        const runOmnivore = omnivore.kml.parse(event.target.result);
-        runOmnivore.on('ready', () => {
-          runOmnivore.eachLayer(l => {
-            l.setStyle({ color: '#f1c40f', weight: 4 });
+        omnivore.kml.parse(event.target.result).on('ready', function() {
+          this.eachLayer(l => {
+            l.setStyle({ color: '#f1c40f' });
             localDrafts.addLayer(l);
             pendingChanges++;
           });
@@ -228,7 +206,6 @@
       };
       reader.readAsText(file);
     };
-
   </script>
 </body>
 </html>
