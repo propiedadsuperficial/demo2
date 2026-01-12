@@ -60,13 +60,14 @@ map.on(L.Draw.Event.CREATED, (e) => {
 });
 
 // --- NUEVA FUNCIÓN: CARGA DE KML ---
+// --- FUNCIÓN DE CARGA KML CORREGIDA ---
 document.getElementById('kmlInput').onchange = function(e) {
   const file = e.target.files[0];
   if (!file) return;
 
   // Validación de peso (100 KB)
   if (file.size > 102400) {
-    alert("El archivo es demasiado pesado (máximo 100KB)");
+    alert("El archivo supera el límite de 100KB.");
     return;
   }
 
@@ -74,20 +75,46 @@ document.getElementById('kmlInput').onchange = function(e) {
   reader.onload = function(event) {
     const kmlText = event.target.result;
     
-    // Usamos omnivore para parsear el string KML
-    const kmlLayer = omnivore.kml.parse(kmlText);
-    
-    kmlLayer.on('ready', function() {
-      kmlLayer.eachLayer(layer => {
-        // Asignamos metadatos por defecto para el KML
-        layer.options.customMetadata = { comentario: "Importado desde KML: " + file.name };
-        localDrafts.addLayer(layer);
+    try {
+      // 1. Convertir el texto KML a una capa de Leaflet usando omnivore
+      const kmlLayer = omnivore.kml.parse(kmlText);
+      
+      kmlLayer.on('ready', function() {
+        // 2. Extraer cada elemento y pasarlo a localDrafts para que sea editable y guardable
+        kmlLayer.eachLayer(layer => {
+          // Mantener el estilo visual de "borrador" (Amarillo)
+          if (layer.setStyle) {
+            layer.setStyle({ color: '#f1c40f', weight: 5, fillOpacity: 0.4 });
+          }
+          
+          // Asignar comentario automático
+          layer.options.customMetadata = { 
+            comentario: "Importado: " + file.name 
+          };
+          
+          localDrafts.addLayer(layer);
+        });
+
+        // 3. Zoom automático a lo cargado
+        if (localDrafts.getLayers().length > 0) {
+          map.fitBounds(localDrafts.getBounds());
+        }
+        
+        actualizarBoton();
+        document.getElementById('status').textContent = `✅ KML cargado: ${file.name}`;
       });
-      map.fitBounds(localDrafts.getBounds());
-      actualizarBoton();
-      alert(`KML cargado: ${file.name}. Presione 'Guardar' para subir a la nube.`);
-    });
+
+      kmlLayer.on('error', function(err) {
+        console.error("Error de omnivore:", err);
+        alert("No se pudo procesar el KML. Asegúrese de que sea un archivo .kml válido.");
+      });
+
+    } catch (err) {
+      console.error("Error al leer el archivo:", err);
+      alert("Error crítico al procesar el archivo.");
+    }
   };
+  
   reader.readAsText(file);
 };
 
