@@ -1,134 +1,28 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GIS Colaborativo - Pucobre (v2.1)</title>
-  
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-  
-  <style>
-    html, body { height: 100%; margin: 0; font-family: 'Segoe UI', sans-serif; }
-    #toolbar { padding: 10px; background: #2c3e50; color: white; display: flex; gap: 12px; align-items: center; z-index: 1000; position: relative; }
-    #map { width: 100%; height: calc(100% - 60px); background: #eee; }
-    .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    .btn-save { background: #27ae60; color: white; }
-    .btn-save:disabled { background: #7f8c8d; }
-    .status { font-size: 13px; color: #bdc3c7; margin-left: auto; }
-    .badge { padding: 2px 6px; border-radius: 10px; font-size: 10px; }
-    .badge-user { background: #34495e; color: #ecf0f1; }
-  </style>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIS Colaborativo - Pucobre</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <link rel="stylesheet" href="index.css" />
 </head>
 <body>
+    <div id="toolbar">
+        <strong>PUCOBRE GIS</strong>
+        <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
+        <label class="btn btn-kml" for="kmlInput">📁 Cargar KML</label>
+        <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
+        <div id="userInfo"></div>
+        <span id="status" class="status">🔌 Iniciando...</span>
+    </div>
 
-  <div id="toolbar">
-    <strong>PUCOBRE GIS</strong>
-    <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
-    <label class="btn" style="background:#3498db; color:white" for="kmlInput">📁 Cargar KML</label>
-    <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
-    <div id="userInfo"></div>
-    <span id="status" class="status">🔌 Iniciando...</span>
-  </div>
+    <div id="map"></div>
 
-  <div id="map"></div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
-
-  <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
-    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
-    import { getAuth, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
-
-    // --- CONFIGURACIÓN Y VALIDACIÓN ---
-    const firebaseConfig = {
-      apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
-      authDomain: "gis-pucobre.firebaseapp.com",
-      projectId: "gis-pucobre",
-      storageBucket: "gis-pucobre.appspot.com",
-      messagingSenderId: "654550355942",
-      appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
-    };
-
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    let userEmail = prompt("Ingrese su correo para registrar sus dibujos:");
-
-    if (!userEmail || !emailPattern.test(userEmail)) {
-      alert("Correo obligatorio.");
-      window.location.reload();
-    }
-
-    // Inicializar App
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    // --- MAPA Y HERRAMIENTAS ---
-    const map = L.map('map').setView([-27.366, -70.332], 14);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
-
-    const cloudLayers = L.featureGroup().addTo(map);
-    const localDrafts = L.featureGroup().addTo(map);
-
-    // Forzar la aparición de herramientas de dibujo
-    const drawControl = new L.Control.Draw({
-      edit: { featureGroup: localDrafts },
-      draw: {
-        circle: false, circlemarker: false,
-        polyline: { shapeOptions: { color: '#f1c40f' } },
-        polygon: { shapeOptions: { color: '#f1c40f' } },
-        marker: true
-      }
-    });
-    map.addControl(drawControl);
-
-    // --- LÓGICA DE FIREBASE ---
-    onAuthStateChanged(auth, (user) => {
-      if (user) {
-        document.getElementById('userInfo').innerHTML = `<span class="badge badge-user">${userEmail.toLowerCase()}</span>`;
-      } else {
-        signInAnonymously(auth);
-      }
-    });
-
-    onSnapshot(collection(db, "geometrias"), (snapshot) => {
-      cloudLayers.clearLayers();
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        L.geoJSON(data.feature, {
-          style: { color: '#3498db' }
-        }).bindPopup(`Responsable: ${data.autor}`).addTo(cloudLayers);
-      });
-      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size}`;
-    });
-
-    // Guardar
-    let pending = 0;
-    map.on(L.Draw.Event.CREATED, (e) => {
-      localDrafts.addLayer(e.layer);
-      pending++;
-      document.getElementById('saveBtn').disabled = false;
-      document.getElementById('saveBtn').innerHTML = `💾 Guardar (${pending})`;
-    });
-
-    document.getElementById('saveBtn').onclick = async () => {
-      const btn = document.getElementById('saveBtn');
-      btn.disabled = true;
-      const layers = localDrafts.getLayers();
-      
-      for (const layer of layers) {
-        await addDoc(collection(db, "geometrias"), {
-          feature: layer.toGeoJSON(),
-          autor: userEmail,
-          fecha: new Date().toLocaleString()
-        });
-        localDrafts.removeLayer(layer);
-      }
-      pending = 0;
-      btn.innerHTML = "💾 Guardar Cambios";
-    };
-  </script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
+    <script type="module" src="index.js"></script>
 </body>
 </html>
