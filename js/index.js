@@ -3,6 +3,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
+// 1. Configuración de Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
@@ -12,7 +13,7 @@ const firebaseConfig = {
   appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
 };
 
-// 1. Manejo de Identidad
+// 2. Manejo de Identidad Persistente
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
   userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
@@ -23,20 +24,22 @@ if (!userEmail) {
   }
 }
 
+// Inicializar Firebase
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
 
-// 2. Inicialización del Mapa
+// 3. Inicialización del Mapa
 const map = L.map('map').setView([-27.366, -70.332], 14);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution: '© Esri'
-}).addTo(map);
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: '© Esri — World Imagery | © Leaflet' }
+).addTo(map);
 
-const cloudLayers  = L.featureGroup().addTo(map);
-const localDrafts  = L.featureGroup().addTo(map);
+const cloudLayers  = L.featureGroup().addTo(map); // Capas desde Firebase
+const localDrafts  = L.featureGroup().addTo(map); // Capas locales (dibujo/KML)
 
-// 3. Controles de Dibujo
+// 4. Controles de Dibujo
 const drawControl = new L.Control.Draw({
   edit: { featureGroup: localDrafts },
   draw: {
@@ -48,7 +51,7 @@ const drawControl = new L.Control.Draw({
 });
 map.addControl(drawControl);
 
-// 4. Captura de Dibujo
+// 5. Captura de Dibujo Manual
 map.on(L.Draw.Event.CREATED, (e) => {
   const layer = e.layer;
   const nota  = prompt(`Ingrese nota técnica para este ${e.layerType}:`);
@@ -59,15 +62,14 @@ map.on(L.Draw.Event.CREATED, (e) => {
   }
 });
 
-// --- NUEVA FUNCIÓN: CARGA DE KML ---
-// --- FUNCIÓN DE CARGA KML CORREGIDA ---
-document.getElementById('kmlInput').onchange = function(e) {
+// --- NUEVA FUNCIÓN: CARGA Y VISUALIZACIÓN DE KML ---
+document.getElementById('kmlInput').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  // Validación de peso (100 KB)
+  // Validación de peso (Máximo 100kb según solicitud)
   if (file.size > 102400) {
-    alert("El archivo supera el límite de 100KB.");
+    alert("El archivo excede los 100KB.");
     return;
   }
 
@@ -75,49 +77,38 @@ document.getElementById('kmlInput').onchange = function(e) {
   reader.onload = function(event) {
     const kmlText = event.target.result;
     
-    try {
-      // 1. Convertir el texto KML a una capa de Leaflet usando omnivore
-      const kmlLayer = omnivore.kml.parse(kmlText);
-      
-      kmlLayer.on('ready', function() {
-        // 2. Extraer cada elemento y pasarlo a localDrafts para que sea editable y guardable
-        kmlLayer.eachLayer(layer => {
-          // Mantener el estilo visual de "borrador" (Amarillo)
-          if (layer.setStyle) {
-            layer.setStyle({ color: '#f1c40f', weight: 5, fillOpacity: 0.4 });
-          }
-          
-          // Asignar comentario automático
-          layer.options.customMetadata = { 
-            comentario: "Importado: " + file.name 
-          };
-          
-          localDrafts.addLayer(layer);
-        });
-
-        // 3. Zoom automático a lo cargado
-        if (localDrafts.getLayers().length > 0) {
-          map.fitBounds(localDrafts.getBounds());
+    // omnivore.kml.parse convierte el texto KML a GeoJSON de Leaflet
+    const kmlLayer = omnivore.kml.parse(kmlText);
+    
+    kmlLayer.on('ready', function() {
+      kmlLayer.eachLayer(layer => {
+        // Estilo de borrador para los elementos del KML
+        if (layer.setStyle) {
+          layer.setStyle({ color: '#f1c40f', weight: 4, fillOpacity: 0.3 });
         }
-        
-        actualizarBoton();
-        document.getElementById('status').textContent = `✅ KML cargado: ${file.name}`;
+        // Metadata para el guardado posterior
+        layer.options.customMetadata = { comentario: "Importado: " + file.name };
+        localDrafts.addLayer(layer);
       });
 
-      kmlLayer.on('error', function(err) {
-        console.error("Error de omnivore:", err);
-        alert("No se pudo procesar el KML. Asegúrese de que sea un archivo .kml válido.");
-      });
+      // Zoom a los elementos cargados
+      if (localDrafts.getLayers().length > 0) {
+        map.fitBounds(localDrafts.getBounds());
+      }
+      
+      actualizarBoton();
+      document.getElementById('status').textContent = `✅ KML cargado: ${file.name}`;
+    });
 
-    } catch (err) {
-      console.error("Error al leer el archivo:", err);
-      alert("Error crítico al procesar el archivo.");
-    }
+    kmlLayer.on('error', function() {
+      alert("Error al procesar el archivo KML. Verifique el formato.");
+    });
   };
   
   reader.readAsText(file);
-};
+});
 
+// 6. Función para actualizar estado del botón de guardado
 function actualizarBoton() {
   const total = localDrafts.getLayers().length;
   const btn   = document.getElementById('saveBtn');
@@ -125,7 +116,7 @@ function actualizarBoton() {
   btn.innerHTML = total > 0 ? `💾 Guardar (${total})` : `💾 Guardar Cambios`;
 }
 
-// 5. Guardado en Firebase
+// 7. Función de Guardado en Firebase
 document.getElementById('saveBtn').onclick = async () => {
   const btn     = document.getElementById('saveBtn');
   const status  = document.getElementById('status');
@@ -140,13 +131,14 @@ document.getElementById('saveBtn').onclick = async () => {
       await addDoc(collection(db, "geometrias"), {
         feature: gjString,
         autor: userEmail,
-        comentario: layer.options.customMetadata?.comentario || "Importado",
+        comentario: layer.options.customMetadata?.comentario || "Sin nota",
         fecha: new Date().toLocaleString('es-CL'),
         timestamp: serverTimestamp()
       });
       localDrafts.removeLayer(layer);
     } catch (err) {
       console.error("Error al guardar:", err);
+      status.textContent = `⚠️ Error: ${err.message}`;
     }
   }
 
@@ -155,30 +147,58 @@ document.getElementById('saveBtn').onclick = async () => {
   actualizarBoton();
 };
 
-// 6. Carga en Tiempo Real
+// 8. Carga de Datos en Tiempo Real (Firebase a Mapa)
 const cloudIndex = new Map();
+
 onSnapshot(collection(db, "geometrias"), (snap) => {
   snap.docChanges().forEach(change => {
-    const id = change.doc.id;
+    const id   = change.doc.id;
     const data = change.doc.data();
-    let feat = typeof data.feature === 'string' ? JSON.parse(data.feature) : data.feature;
+
+    let feat = data.feature;
+    if (typeof feat === 'string') {
+      try { feat = JSON.parse(feat); } catch (e) { return; }
+    }
 
     if (change.type === "added" || change.type === "modified") {
-      if (cloudIndex.has(id)) cloudLayers.removeLayer(cloudIndex.get(id));
-      
+      // Remover si ya existe para actualizar
+      if (cloudIndex.has(id)) {
+        cloudLayers.removeLayer(cloudIndex.get(id));
+      }
+
       const layer = L.geoJSON(feat, {
         style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
         pointToLayer: (_, latlng) => L.marker(latlng)
-      }).bindPopup(`<strong>Nota:</strong> ${data.comentario}<br><small>Por: ${data.autor}</small>`);
+      }).bindPopup(
+        `<div style="font-family: sans-serif;">
+           <strong>Nota Técnica:</strong><br>${data.comentario}<br>
+           <hr style="margin: 5px 0;">
+           <small>Responsable: ${data.autor}</small>
+         </div>`
+      );
       
       layer.addTo(cloudLayers);
       cloudIndex.set(id, layer);
+
+    } else if (change.type === "removed") {
+      const layer = cloudIndex.get(id);
+      if (layer) {
+        cloudLayers.removeLayer(layer);
+        cloudIndex.delete(id);
+      }
     }
   });
-  document.getElementById('status').textContent = `📡 Nube: ${snap.size}`;
+
+  document.getElementById('status').textContent = `📡 Conectado | Nube: ${snap.size}`;
 });
 
-signInAnonymously(auth);
+// 9. Autenticación Anónima
+signInAnonymously(auth).catch((e) => {
+  document.getElementById('status').textContent = `⚠️ Error Auth: ${e.message}`;
+});
+
 onAuthStateChanged(auth, (user) => {
-  if (user) document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
+  if (user) {
+    document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
+  }
 });
