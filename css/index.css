@@ -2,10 +2,12 @@ html, body {
     height: 100%; 
     margin: 0; 
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+    overflow: hidden;
 }
 
 #toolbar { 
-    padding: 10px; 
+    height: 55px;
+    padding: 0 15px; 
     background: #2c3e50; 
     color: white; 
     display: flex; 
@@ -13,11 +15,12 @@ html, body {
     align-items: center; 
     box-shadow: 0 2px 5px rgba(0,0,0,0.2); 
     z-index: 1000;
+    position: relative;
 }
 
 #map { 
     width: 100%; 
-    height: calc(100% - 60px); 
+    height: calc(100vh - 55px); 
     background: #eee; 
 }
 
