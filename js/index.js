@@ -1,12 +1,8 @@
-
 // js/index.js
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-//
-// Configuración de Firebase (pestaña "Config" del SDK en tu consola)
-//
 const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
@@ -16,7 +12,7 @@ const firebaseConfig = {
   appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
 };
 
-// 1. Manejo de Identidad (Persistente)
+// 1. Manejo de Identidad
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
   userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
@@ -27,22 +23,20 @@ if (!userEmail) {
   }
 }
 
-// Inicializar Firebase
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
 
 // 2. Inicialización del Mapa
 const map = L.map('map').setView([-27.366, -70.332], 14);
-L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution: '© Esri — World Imagery | © Leaflet' }
-).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: '© Esri'
+}).addTo(map);
 
 const cloudLayers  = L.featureGroup().addTo(map);
 const localDrafts  = L.featureGroup().addTo(map);
 
-// 3. Controles de Dibujo (Habilitados para Polígonos y Líneas)
+// 3. Controles de Dibujo
 const drawControl = new L.Control.Draw({
   edit: { featureGroup: localDrafts },
   draw: {
@@ -54,7 +48,7 @@ const drawControl = new L.Control.Draw({
 });
 map.addControl(drawControl);
 
-// 4. Captura de Dibujo y Comentario Técnico
+// 4. Captura de Dibujo
 map.on(L.Draw.Event.CREATED, (e) => {
   const layer = e.layer;
   const nota  = prompt(`Ingrese nota técnica para este ${e.layerType}:`);
@@ -65,6 +59,38 @@ map.on(L.Draw.Event.CREATED, (e) => {
   }
 });
 
+// --- NUEVA FUNCIÓN: CARGA DE KML ---
+document.getElementById('kmlInput').onchange = function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Validación de peso (100 KB)
+  if (file.size > 102400) {
+    alert("El archivo es demasiado pesado (máximo 100KB)");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    const kmlText = event.target.result;
+    
+    // Usamos omnivore para parsear el string KML
+    const kmlLayer = omnivore.kml.parse(kmlText);
+    
+    kmlLayer.on('ready', function() {
+      kmlLayer.eachLayer(layer => {
+        // Asignamos metadatos por defecto para el KML
+        layer.options.customMetadata = { comentario: "Importado desde KML: " + file.name };
+        localDrafts.addLayer(layer);
+      });
+      map.fitBounds(localDrafts.getBounds());
+      actualizarBoton();
+      alert(`KML cargado: ${file.name}. Presione 'Guardar' para subir a la nube.`);
+    });
+  };
+  reader.readAsText(file);
+};
+
 function actualizarBoton() {
   const total = localDrafts.getLayers().length;
   const btn   = document.getElementById('saveBtn');
@@ -72,7 +98,7 @@ function actualizarBoton() {
   btn.innerHTML = total > 0 ? `💾 Guardar (${total})` : `💾 Guardar Cambios`;
 }
 
-// 5. Función de Guardado Universal (Guarda como STRING para evitar arrays anidados)
+// 5. Guardado en Firebase
 document.getElementById('saveBtn').onclick = async () => {
   const btn     = document.getElementById('saveBtn');
   const status  = document.getElementById('status');
@@ -83,18 +109,17 @@ document.getElementById('saveBtn').onclick = async () => {
 
   for (const layer of layers) {
     try {
-      const gjString = JSON.stringify(layer.toGeoJSON());  // ← convertir a string
+      const gjString = JSON.stringify(layer.toGeoJSON());
       await addDoc(collection(db, "geometrias"), {
-        feature: gjString,                                  // ← guardar como texto
+        feature: gjString,
         autor: userEmail,
-        comentario: layer.options.customMetadata?.comentario || "Sin nota",
+        comentario: layer.options.customMetadata?.comentario || "Importado",
         fecha: new Date().toLocaleString('es-CL'),
         timestamp: serverTimestamp()
       });
       localDrafts.removeLayer(layer);
     } catch (err) {
       console.error("Error al guardar:", err);
-      status.textContent = `⚠️ Error al guardar: ${err.code || ''} ${err.message || err}`;
     }
   }
 
@@ -103,69 +128,30 @@ document.getElementById('saveBtn').onclick = async () => {
   actualizarBoton();
 };
 
-// 6. Carga de Datos en Tiempo Real (incremental con docChanges)
+// 6. Carga en Tiempo Real
 const cloudIndex = new Map();
-
 onSnapshot(collection(db, "geometrias"), (snap) => {
   snap.docChanges().forEach(change => {
-    const id   = change.doc.id;
+    const id = change.doc.id;
     const data = change.doc.data();
+    let feat = typeof data.feature === 'string' ? JSON.parse(data.feature) : data.feature;
 
-    // Tolerar string u objeto en "feature"
-    let feat = data.feature;
-    if (typeof feat === 'string') {
-      try { feat = JSON.parse(feat); }
-      catch (e) { console.error('JSON parse error:', e); return; }
-    }
-
-    if (change.type === "added") {
+    if (change.type === "added" || change.type === "modified") {
+      if (cloudIndex.has(id)) cloudLayers.removeLayer(cloudIndex.get(id));
+      
       const layer = L.geoJSON(feat, {
         style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
         pointToLayer: (_, latlng) => L.marker(latlng)
-      }).bindPopup(
-        `<div style="font-family: sans-serif;">
-           <strong>Nota Técnica:</strong><br>${data.comentario}<br>
-           <hr style="margin: 5px 0;">
-           <small>Responsable: ${data.autor}</small>
-         </div>`
-      );
-      layer.addTo(cloudLayers);
-      cloudIndex.set(id, layer);
-
-    } else if (change.type === "removed") {
-      const layer = cloudIndex.get(id);
-      if (layer) { cloudLayers.removeLayer(layer); cloudIndex.delete(id); }
-
-    } else if (change.type === "modified") {
-      const old = cloudIndex.get(id);
-      if (old) { cloudLayers.removeLayer(old); }
-      const layer = L.geoJSON(feat, {
-        style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
-        pointToLayer: (_, latlng) => L.marker(latlng)
-      }).bindPopup(
-        `<div style="font-family: sans-serif;">
-           <strong>Nota Técnica:</strong><br>${data.comentario}<br>
-           <hr style="margin: 5px 0;">
-           <small>Responsable: ${data.autor}</small>
-         </div>`
-      );
+      }).bindPopup(`<strong>Nota:</strong> ${data.comentario}<br><small>Por: ${data.autor}</small>`);
+      
       layer.addTo(cloudLayers);
       cloudIndex.set(id, layer);
     }
   });
-
-  document.getElementById('status').textContent = `📡 Conectado | Nube: ${snap.size}`;
+  document.getElementById('status').textContent = `📡 Nube: ${snap.size}`;
 });
 
-// 7. Autenticación (debe estar habilitada la opción Anonymous en la consola)
-signInAnonymously(auth).catch((e) => {
-  console.error('Auth anónima falló:', e);
-  const status = document.getElementById('status');
-  status.textContent = `⚠️ Auth: ${e.code || ''} ${e.message || e}`;
-});
-
+signInAnonymously(auth);
 onAuthStateChanged(auth, (user) => {
-  if (user) {
-    document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
-  }
+  if (user) document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
 });
