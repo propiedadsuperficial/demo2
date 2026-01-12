@@ -3,15 +3,13 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-// --- 0. CAPTURA DE PARÁMETROS DINÁMICOS (URL SharePoint) ---
+// --- NUEVO: CAPTURA DE PARÁMETROS DESDE SHAREPOINT ---
 const urlParams = new URLSearchParams(window.location.search);
-// Si la URL no trae 'area', se usa 'general' por defecto
-const proyectoID = urlParams.get('area') || 'general';
+const proyectoID = urlParams.get('area') || 'general'; // Detecta "pozo13" desde la URL
 const latInicial = parseFloat(urlParams.get('lat')) || -27.366;
 const lngInicial = parseFloat(urlParams.get('lng')) || -70.332;
 const zoomInicial = parseInt(urlParams.get('zoom')) || 14;
 
-// 1. Configuración de Firebase corregida
 const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
@@ -21,7 +19,7 @@ const firebaseConfig = {
   appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
 };
 
-// Manejo de Identidad
+// 1. Manejo de Identidad
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
   userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
@@ -79,7 +77,6 @@ function actualizarBoton() {
 document.getElementById('kmlInput').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
-
   const reader = new FileReader();
   reader.onload = function(event) {
     const kmlLayer = omnivore.kml.parse(event.target.result);
@@ -96,7 +93,7 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
   reader.readAsText(file);
 });
 
-// 6. Guardado en Firebase (PARAMETRIZADO POR PROYECTO)
+// 6. Guardado en Firebase (AJUSTADO A PROYECTO)
 document.getElementById('saveBtn').onclick = async () => {
   const btn = document.getElementById('saveBtn');
   const layers = localDrafts.getLayers();
@@ -105,7 +102,7 @@ document.getElementById('saveBtn').onclick = async () => {
   for (const layer of layers) {
     try {
       const gjString = JSON.stringify(layer.toGeoJSON());
-      // Se guarda en la colección específica del proyecto enviado por URL
+      // IMPORTANTE: Se guarda en una colección específica para este proyecto
       await addDoc(collection(db, `geometrias_${proyectoID}`), {
         feature: gjString,
         autor: userEmail,
@@ -116,26 +113,27 @@ document.getElementById('saveBtn').onclick = async () => {
       localDrafts.removeLayer(layer);
     } catch (err) {
       console.error("Error al guardar:", err);
-      alert("Error de permisos en Firebase. Verifique las Reglas de Seguridad.");
+      alert("Error de permisos: Verifique las reglas en Firebase Console.");
     }
   }
   btn.disabled = false;
   actualizarBoton();
 };
 
-// 7. Sincronización Nube (PARAMETRIZADA POR PROYECTO)
-// Se conecta solo a la colección del área actual (ej: geometrias_pozo13)
+// 7. Sincronización Nube (AJUSTADA A PROYECTO)
 onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
-  cloudLayers.clearLayers(); // Limpiamos para evitar duplicados al recargar
+  cloudLayers.clearLayers(); 
   snap.forEach(doc => {
-    const data = doc.data();
-    const feat = JSON.parse(data.feature);
-    L.geoJSON(feat, {
-      style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
-    }).bindPopup(`<b>${data.comentario}</b><br><small>${data.autor}</small>`).addTo(cloudLayers);
+      const data = doc.data();
+      const feat = JSON.parse(data.feature);
+      L.geoJSON(feat, {
+        style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
+      }).bindPopup(`<b>${data.comentario}</b><br><small>${data.autor}</small>`).addTo(cloudLayers);
   });
-  // Actualizamos el indicador visual de estado
+  // Actualización del estatus visual
   document.getElementById('status').textContent = `📡 Proyecto: ${proyectoID.toUpperCase()} | Nube: ${snap.size}`;
+}, (error) => {
+    console.error("Error en snapshot:", error);
 });
 
 signInAnonymously(auth);
