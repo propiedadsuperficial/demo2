@@ -1,22 +1,4 @@
-"Hola. Estoy desarrollando un GIS con Leaflet y Firebase. Tengo un problema: el sistema no visualiza los archivos KML al cargarlos, aunque el archivo es pequeño (menos de 100kb).
-
-Mi configuración actual:
-
-Uso leaflet-omnivore para parsear el KML.
-
-Uso FileReader.readAsText para obtener el contenido.
-
-El index.html ya tiene cargadas las librerías de Leaflet, Draw y Omnivore.
-
-El problema: Al seleccionar el archivo, no se dispara el evento ready de omnivore o no se añaden las capas al featureGroup de localDrafts. No hay errores de consola claros sobre el KML, pero el mapa no hace zoom ni muestra los vértices.
-
-Tu tarea: Analiza mi código index.js adjunto y dime:
-
-¿Está bien implementada la función omnivore.kml.parse(kmlText)?
-
-¿Hay algún conflicto entre las capas de dibujo y las de omnivore?
-
-Genera el código corregido de la función de carga para que fuerce la visualización inmediata y haga un console.log de cada capa detectada."  index.js: // js/index.js
+// js/index.js
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
