@@ -32,7 +32,7 @@
     <strong>PUCOBRE GIS</strong>
     <button id="saveBtn" class="btn btn-save" disabled title="Sincronizar borradores locales con la nube">💾 Guardar Cambios</button>
     <label class="btn" style="background:#3498db; color:white" for="kmlInput">📁 Cargar KML</label>
-    <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
+    <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
     <button id="debugToggle" class="btn" style="background:#9b59b6; color:white">🐛 Debug</button>
     <div id="userInfo" style="display: flex; gap: 5px; align-items: center;"></div>
     <span id="status" class="status">🔌 Iniciando...</span>
@@ -46,16 +46,14 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
 
   <script type="module">
-    // NOTE: Importaciones modulares de Firebase v10
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
     import { getAuth, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-    // === CONFIGURACIÓN Y PARÁMETROS ===
-    // TODO: Reemplaza con tu UID real tras loguearte como Superusuario
-    const SUPERUSER_UID = "<REEMPLAZA_CON_TU_UID>"; 
+    // === CONFIGURACIÓN ===
+    // REEMPLAZA ESTE UID CON EL QUE OBTENGAS DEL PANEL DEBUG PARA TENER PERMISOS DE BORRADO
+    const SUPERUSER_UID = "PEGAR_AQUI_TU_UID_SI_QUIERES_SER_ADMIN"; 
     const COLLECTION_NAME = "geometrias";
-    const GH_PAGES_DOMAIN = "propiedadespucobreoficial.github.io";
 
     const firebaseConfig = {
       apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
@@ -66,21 +64,19 @@
       appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
     };
 
-    // Inicialización
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
     let currentUser = null;
     let isSuperuser = false;
 
-    // === SISTEMA DE DEBUG ===
+    // === DEBUG SYSTEM ===
     const debugPanel = document.getElementById('debugPanel');
     let debugMessages = [];
     function debugLog(message, type = 'info') {
       const ts = new Date().toLocaleTimeString();
       const emojis = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️' };
       const msg = `${ts} ${emojis[type] || '🔹'} ${message}`;
-      console.log(msg);
       debugMessages.push(`<div>${msg}</div>`);
       if (debugMessages.length > 50) debugMessages.shift();
       debugPanel.innerHTML = debugMessages.join('');
@@ -88,43 +84,21 @@
     }
     document.getElementById('debugToggle').onclick = () => debugPanel.classList.toggle('active');
 
-    // === GESTIÓN DE AUTENTICACIÓN ===
-    onAuthStateChanged(auth, (user) => {
-      if (user) {
-        currentUser = user;
-        isSuperuser = (user.uid === SUPERUSER_UID);
-        debugLog(`Usuario autenticado: ${user.uid} (${isSuperuser ? 'SUPERUSER' : 'ANON'})`, 'success');
-        
-        const badge = isSuperuser ? '<span class="badge badge-admin">SUPERUSER</span>' : '<span class="badge badge-user">LECTOR/EDITOR</span>';
-        document.getElementById('userInfo').innerHTML = `${badge} <small style="color:white">${user.uid.substring(0,6)}...</small>`;
-        
-        initMapControls(); // Inicializar o re-inicializar controles según permisos
-      } else {
-        debugLog('No hay sesión. Iniciando login anónimo...', 'warning');
-        signInAnonymously(auth).catch(err => debugLog(`Error Auth: ${err.code}`, 'error'));
-      }
-    });
-
-    // === CONFIGURACIÓN DEL MAPA ===
+    // === MAP SETUP ===
     const map = L.map('map').setView([-27.366, -70.332], 14);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery'
     }).addTo(map);
 
-    const cloudLayers = L.featureGroup().addTo(map);   // Geometrías de Firestore
-    const localDrafts = L.featureGroup().addTo(map);   // Borradores locales (amarillos)
+    const cloudLayers = L.featureGroup().addTo(map);
+    const localDrafts = L.featureGroup().addTo(map);
     let drawControl = null;
 
+    // AHORA LAS HERRAMIENTAS SE INICIALIZAN PARA TODOS
     function initMapControls() {
       if (drawControl) map.removeControl(drawControl);
-      
-      // CA2 & CA3: Solo superusuario ve herramientas de edición/borrado de capas existentes
       drawControl = new L.Control.Draw({
-        edit: {
-          featureGroup: localDrafts, // Solo permitimos editar lo que aún no se guarda
-          remove: true,
-          edit: true
-        },
+        edit: { featureGroup: localDrafts, remove: true, edit: true },
         draw: {
           circle: false, circlemarker: false,
           polyline: { shapeOptions: { color: '#f1c40f', weight: 5 } },
@@ -134,14 +108,28 @@
         }
       });
       map.addControl(drawControl);
+      debugLog("Herramientas de dibujo habilitadas para el usuario.", "success");
     }
 
-    // === MANEJO DE CAPAS NUBE (READ & SYNC) ===
-    // CA1 & CA4: Sincronización en tiempo real con onSnapshot
+    // === AUTHENTICATION ===
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        currentUser = user;
+        isSuperuser = (user.uid === SUPERUSER_UID);
+        debugLog(`Autenticado: ${user.uid}`, 'success');
+        
+        const badge = isSuperuser ? '<span class="badge badge-admin">SUPERUSER</span>' : '<span class="badge badge-user">EDITOR</span>';
+        document.getElementById('userInfo').innerHTML = `${badge} <small style="color:white">${user.uid.substring(0,6)}...</small>`;
+        
+        initMapControls(); // Habilitar dibujo al conectar
+      } else {
+        signInAnonymously(auth).catch(err => debugLog(`Error Auth: ${err.code}`, 'error'));
+      }
+    });
+
+    // === FIRESTORE REAL-TIME SYNC ===
     onSnapshot(collection(db, COLLECTION_NAME), (snapshot) => {
       cloudLayers.clearLayers();
-      let counts = { Point: 0, LineString: 0, Polygon: 0 };
-
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (!data.feature) return;
@@ -151,49 +139,36 @@
           pointToLayer: (feat, latlng) => L.marker(latlng)
         });
 
-        // Popup con opción de eliminar si es superusuario
         geojson.bindPopup(() => {
           const container = document.createElement('div');
           container.innerHTML = `
-            <strong>${data.autor || 'Anon'}</strong><br>
-            <small>${data.fecha || 'Sin fecha'}</small><hr>
-            ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">🗑 Eliminar</button>` : ''}
+            <strong>Operador:</strong> ${data.autor || 'Anon'}<br>
+            <strong>Fecha:</strong> ${data.fecha || 'Sin fecha'}<hr>
+            ${isSuperuser ? `<button class="btn" style="background:#e74c3c; color:white; font-size:10px" onclick="window.deleteFeature('${docSnap.id}')">🗑 Eliminar Permanente</button>` : '<small>Solo admin puede borrar</small>'}
           `;
           return container;
         });
-
         geojson.addTo(cloudLayers);
-        const type = data.feature.geometry.type;
-        counts[type] = (counts[type] || 0) + 1;
       });
-
-      const total = snapshot.size;
-      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${total} obj.`;
-      debugLog(`Sincronizados ${total} objetos de Firestore`, 'success');
+      document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snapshot.size} obj.`;
     }, (err) => {
-      debugLog(`Error de Snapshot: ${err.code}`, 'error');
-      document.getElementById('status').innerHTML = `❌ Desconectado (${err.code})`;
+      document.getElementById('status').innerHTML = `❌ Error: ${err.code}`;
+      debugLog(`Error Firestore: ${err.message}`, 'error');
     });
 
-    // Función global para que el popup pueda borrar (solo si las reglas lo permiten)
     window.deleteFeature = async (id) => {
-      if (!isSuperuser) return alert("No tienes permisos.");
-      if (confirm("¿Eliminar geometría de forma permanente?")) {
+      if (confirm("¿Eliminar de la nube permanentemente?")) {
         try {
           await deleteDoc(doc(db, COLLECTION_NAME, id));
-          debugLog(`Documento ${id} eliminado`, 'success');
-        } catch (e) {
-          debugLog(`Error al borrar: ${e.message}`, 'error');
-        }
+          debugLog(`Objeto ${id} eliminado.`, 'success');
+        } catch (e) { debugLog(`Error: ${e.message}`, 'error'); }
       }
     };
 
-    // === EVENTOS DE DIBUJO LOCAL ===
+    // === DRAW EVENTS & SAVE ===
     let pendingChanges = 0;
     map.on(L.Draw.Event.CREATED, (e) => {
-      const layer = e.layer;
-      layer.geometryType = e.layerType;
-      localDrafts.addLayer(layer);
+      localDrafts.addLayer(e.layer);
       pendingChanges++;
       updateSaveUI();
     });
@@ -210,76 +185,50 @@
       btn.innerHTML = pendingChanges > 0 ? `💾 Guardar Cambios (${pendingChanges})` : `💾 Guardar Cambios`;
     }
 
-    // === GUARDADO (PERSISTENCIA) ===
-    // CA6: Limpiar solo lo exitoso
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const layers = localDrafts.getLayers();
-      const operator = prompt("Nombre del operador:", "Anon") || "Anon";
+      const operator = prompt("Nombre del operador:", "Colaborador Pucobre") || "Anon";
       
       btn.disabled = true;
-      btn.innerHTML = "⌛ Procesando...";
+      btn.innerHTML = "⌛ Sincronizando...";
       
-      let successCount = 0;
-      let errorCount = 0;
-
       for (const layer of layers) {
         try {
-          const geojson = layer.toGeoJSON();
-          // Inyectamos metadatos requeridos por reglas y UI
           await addDoc(collection(db, COLLECTION_NAME), {
-            feature: geojson,
+            feature: layer.toGeoJSON(),
             autor: operator,
             createdBy: currentUser.uid,
             createdAt: serverTimestamp(),
             fecha: new Date().toLocaleString('es-CL')
           });
-          
-          localDrafts.removeLayer(layer); // Removemos del mapa solo si Firestore aceptó
-          successCount++;
-        } catch (err) {
-          errorCount++;
-          debugLog(`Fallo en objeto: ${err.message}`, 'error');
-        }
+          localDrafts.removeLayer(layer);
+        } catch (err) { debugLog(`Error al guardar: ${err.message}`, 'error'); }
       }
-
       pendingChanges = localDrafts.getLayers().length;
       updateSaveUI();
-      
-      if (errorCount > 0) {
-        alert(`Guardado parcial: ${successCount} ok, ${errorCount} fallaron (revisa reglas de Firestore).`);
-      } else {
-        debugLog(`¡Éxito! ${successCount} geometrías guardadas.`, 'success');
-      }
     };
 
-    // === IMPORTACIÓN KML (CA5) ===
+    // === KML IMPORT ===
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
       const reader = new FileReader();
       reader.onload = (event) => {
-        const kmlData = event.target.result;
-        const runOmnivore = omnivore.kml.parse(kmlData);
-        
+        const runOmnivore = omnivore.kml.parse(event.target.result);
         runOmnivore.on('ready', () => {
-          let count = 0;
           runOmnivore.eachLayer(l => {
             l.setStyle({ color: '#f1c40f', weight: 4 });
             localDrafts.addLayer(l);
-            count++;
+            pendingChanges++;
           });
-          pendingChanges += count;
           updateSaveUI();
           map.fitBounds(localDrafts.getBounds());
-          debugLog(`KML: ${count} elementos cargados como borrador`, 'success');
         });
       };
       reader.readAsText(file);
     };
 
   </script>
-
-  </body>
+</body>
 </html>
