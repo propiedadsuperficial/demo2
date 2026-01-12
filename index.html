@@ -15,6 +15,23 @@
     .btn-save:disabled { background: #7f8c8d; cursor: not-allowed; }
     .btn-save.pending { background: #e74c3c; }
     .status { font-size: 12px; color: #bdc3c7; margin-left: auto; }
+    .debug-panel { 
+      position: fixed; 
+      bottom: 10px; 
+      left: 10px; 
+      background: rgba(0,0,0,0.8); 
+      color: #0f0; 
+      padding: 10px; 
+      border-radius: 5px; 
+      font-family: monospace; 
+      font-size: 11px; 
+      max-width: 400px;
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+      z-index: 9999;
+    }
+    .debug-panel.active { display: block; }
   </style>
 </head>
 <body>
@@ -23,9 +40,11 @@
     <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
     <label class="btn" style="background:#3498db; color:white" for="kmlInput">📁 Cargar KML</label>
     <input id="kmlInput" type="file" style="display:none" accept=".kml" />
+    <button id="debugToggle" class="btn" style="background:#9b59b6; color:white">🐛 Debug</button>
     <span id="status" class="status">Conectando...</span>
   </div>
   <div id="map"></div>
+  <div id="debugPanel" class="debug-panel"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
@@ -35,7 +54,31 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 
-    // Credenciales Firebase
+    // ===== DEBUG SYSTEM =====
+    const debugPanel = document.getElementById('debugPanel');
+    const debugToggle = document.getElementById('debugToggle');
+    let debugMessages = [];
+    
+    function debugLog(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString('es-CL');
+      const emoji = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+      const msg = `${timestamp} ${emoji} ${message}`;
+      
+      console.log(msg);
+      debugMessages.push(msg);
+      if (debugMessages.length > 20) debugMessages.shift();
+      
+      debugPanel.innerHTML = debugMessages.map(m => `<div>${m}</div>`).join('');
+      debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
+    
+    debugToggle.onclick = () => {
+      debugPanel.classList.toggle('active');
+    };
+
+    // ===== FIREBASE CONFIG =====
+    debugLog('Inicializando Firebase...');
+    
     const firebaseConfig = {
       apiKey: "AIzaSyB3kW9ep7iOKDp87i2-er5-CuZKerA4puY",
       authDomain: "gis-pucobre.firebaseapp.com",
@@ -48,8 +91,10 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const miNombre = prompt("Operador:") || "Operador";
+    
+    debugLog(`Firebase inicializado. Usuario: ${miNombre}`, 'success');
 
-    // Mapa con Esri Satélite
+    // ===== MAPA =====
     const map = L.map('map').setView([-27.366, -70.332], 14);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Esri World Imagery'
@@ -70,7 +115,6 @@
       }
     }).addTo(map);
 
-    // Contador de capas pendientes
     let pendingChanges = 0;
 
     function updateSaveButton() {
@@ -86,57 +130,93 @@
       }
     }
 
-    // ✅ FUNCIÓN CRÍTICA: Convierte cualquier capa de Leaflet a GeoJSON
+    // ===== CONVERSIÓN GEOJSON MEJORADA =====
+    function validateCoordinates(coords) {
+      if (!Array.isArray(coords)) return false;
+      if (coords.length < 2) return false;
+      
+      // Validar que cada coordenada tenga lng y lat válidos
+      return coords.every(coord => {
+        if (!Array.isArray(coord) || coord.length < 2) return false;
+        const [lng, lat] = coord;
+        return typeof lng === 'number' && typeof lat === 'number' &&
+               !isNaN(lng) && !isNaN(lat) &&
+               lng >= -180 && lng <= 180 &&
+               lat >= -90 && lat <= 90;
+      });
+    }
+
     function layerToGeoJSON(layer, layerType) {
       try {
-        // Para markers (puntos)
+        debugLog(`Convirtiendo ${layerType}...`);
+        
+        // MARKERS (Puntos)
         if (layerType === 'marker' || layer instanceof L.Marker) {
           const latlng = layer.getLatLng();
-          return {
+          
+          if (!latlng || isNaN(latlng.lat) || isNaN(latlng.lng)) {
+            debugLog('Marker inválido: coordenadas NaN', 'error');
+            return null;
+          }
+          
+          const geojson = {
             type: "Feature",
             geometry: {
               type: "Point",
               coordinates: [latlng.lng, latlng.lat]
             },
-            properties: { layerType: 'marker' }
+            properties: { 
+              layerType: 'marker',
+              created: new Date().toISOString()
+            }
           };
+          
+          debugLog(`✓ Marker: [${latlng.lng.toFixed(4)}, ${latlng.lat.toFixed(4)}]`, 'success');
+          return geojson;
         }
         
-        // Para polylines (líneas)
-        if (layerType === 'polyline' || layer instanceof L.Polyline) {
+        // POLYLINES (Líneas)
+        if (layerType === 'polyline' || (layer instanceof L.Polyline && !(layer instanceof L.Polygon))) {
           const latlngs = layer.getLatLngs();
+          
+          if (!latlngs || latlngs.length < 2) {
+            debugLog('Polyline inválida: menos de 2 puntos', 'error');
+            return null;
+          }
+          
           const coordinates = latlngs.map(ll => [ll.lng, ll.lat]);
-          return {
+          
+          if (!validateCoordinates(coordinates)) {
+            debugLog('Polyline inválida: coordenadas corruptas', 'error');
+            return null;
+          }
+          
+          const geojson = {
             type: "Feature",
             geometry: {
               type: "LineString",
               coordinates: coordinates
             },
-            properties: { layerType: 'polyline' }
+            properties: { 
+              layerType: 'polyline',
+              pointCount: coordinates.length,
+              created: new Date().toISOString()
+            }
           };
+          
+          debugLog(`✓ Polyline: ${coordinates.length} puntos`, 'success');
+          return geojson;
         }
         
-        // Para polygons (polígonos libres)
-        if (layerType === 'polygon' || (layer instanceof L.Polygon && !(layer instanceof L.Rectangle))) {
-          const latlngs = layer.getLatLngs()[0]; // Primer anillo del polígono
-          const coordinates = latlngs.map(ll => [ll.lng, ll.lat]);
-          // Cerrar el polígono si no está cerrado
-          if (JSON.stringify(coordinates[0]) !== JSON.stringify(coordinates[coordinates.length - 1])) {
-            coordinates.push(coordinates[0]);
-          }
-          return {
-            type: "Feature",
-            geometry: {
-              type: "Polygon",
-              coordinates: [coordinates]
-            },
-            properties: { layerType: 'polygon' }
-          };
-        }
-        
-        // Para rectangles (rectángulos)
+        // RECTANGLES (deben chequearse ANTES que Polygons)
         if (layerType === 'rectangle' || layer instanceof L.Rectangle) {
           const bounds = layer.getBounds();
+          
+          if (!bounds || !bounds.isValid()) {
+            debugLog('Rectangle inválido: bounds inválidos', 'error');
+            return null;
+          }
+          
           const sw = bounds.getSouthWest();
           const ne = bounds.getNorthEast();
           const nw = L.latLng(ne.lat, sw.lng);
@@ -147,36 +227,101 @@
             [se.lng, se.lat],
             [ne.lng, ne.lat],
             [nw.lng, nw.lat],
-            [sw.lng, sw.lat] // Cerrar el rectángulo
+            [sw.lng, sw.lat]
           ];
           
-          return {
+          if (!validateCoordinates(coordinates)) {
+            debugLog('Rectangle inválido: coordenadas corruptas', 'error');
+            return null;
+          }
+          
+          const geojson = {
             type: "Feature",
             geometry: {
               type: "Polygon",
               coordinates: [coordinates]
             },
-            properties: { layerType: 'rectangle' }
+            properties: { 
+              layerType: 'rectangle',
+              bounds: {
+                south: sw.lat,
+                west: sw.lng,
+                north: ne.lat,
+                east: ne.lng
+              },
+              created: new Date().toISOString()
+            }
           };
+          
+          debugLog(`✓ Rectangle: [${sw.lng.toFixed(4)}, ${sw.lat.toFixed(4)}] a [${ne.lng.toFixed(4)}, ${ne.lat.toFixed(4)}]`, 'success');
+          return geojson;
         }
         
-        // Fallback: intentar toGeoJSON nativo
-        return layer.toGeoJSON();
+        // POLYGONS (Polígonos libres)
+        if (layerType === 'polygon' || layer instanceof L.Polygon) {
+          const latlngs = layer.getLatLngs();
+          
+          if (!latlngs || latlngs.length === 0) {
+            debugLog('Polygon inválido: sin puntos', 'error');
+            return null;
+          }
+          
+          // Manejar polígonos simples y multiparte
+          const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
+          
+          if (ring.length < 3) {
+            debugLog('Polygon inválido: menos de 3 puntos', 'error');
+            return null;
+          }
+          
+          const coordinates = ring.map(ll => [ll.lng, ll.lat]);
+          
+          // Cerrar el polígono si no está cerrado
+          const first = coordinates[0];
+          const last = coordinates[coordinates.length - 1];
+          if (first[0] !== last[0] || first[1] !== last[1]) {
+            coordinates.push([first[0], first[1]]);
+          }
+          
+          if (!validateCoordinates(coordinates)) {
+            debugLog('Polygon inválido: coordenadas corruptas', 'error');
+            return null;
+          }
+          
+          const geojson = {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [coordinates]
+            },
+            properties: { 
+              layerType: 'polygon',
+              pointCount: coordinates.length - 1,
+              created: new Date().toISOString()
+            }
+          };
+          
+          debugLog(`✓ Polygon: ${coordinates.length - 1} puntos`, 'success');
+          return geojson;
+        }
+        
+        debugLog(`Tipo desconocido: ${layerType}`, 'warning');
+        return null;
         
       } catch (error) {
-        console.error('Error convirtiendo capa a GeoJSON:', error, layer);
+        debugLog(`Error en conversión: ${error.message}`, 'error');
+        console.error('Error detallado:', error, layer);
         return null;
       }
     }
 
-    // ✅ Dibujo creado - Con conversión mejorada
+    // ===== EVENTOS DE DIBUJO =====
     map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
       const type = e.layerType;
       
-      console.log('✏️ Geometría creada:', type);
+      debugLog(`Dibujado: ${type}`);
       
-      // Aplicar estilos según el tipo
       if (type === 'polyline') {
         layer.setStyle({ color: '#f39c12', weight: 4 });
       } else if (type === 'polygon' || type === 'rectangle') {
@@ -188,148 +333,181 @@
         });
       }
       
-      // Agregar al grupo de borradores
-      localDrafts.addLayer(layer);
-      
-      // Guardar el tipo de geometría en la capa para referencia
       layer.geometryType = type;
+      localDrafts.addLayer(layer);
       
       pendingChanges++;
       updateSaveButton();
       
-      console.log('✅ Capa agregada. Pendientes:', pendingChanges);
+      debugLog(`✓ Agregado a borradores (${pendingChanges} pendientes)`, 'success');
     });
 
-    // Geometría editada
     map.on(L.Draw.Event.EDITED, (e) => {
-      console.log('✏️ Geometrías editadas');
+      debugLog('Geometrías editadas');
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
-    // Geometría eliminada
     map.on(L.Draw.Event.DELETED, (e) => {
-      console.log('🗑️ Geometrías eliminadas');
+      debugLog('Geometrías eliminadas');
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
-    // ✅ Botón de guardado - Con conversión mejorada
+    // ===== GUARDADO CON VALIDACIÓN ROBUSTA =====
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const originalText = btn.textContent;
       
       btn.disabled = true;
       btn.textContent = "⌛ Guardando...";
+      
+      debugLog('==================');
+      debugLog('Iniciando guardado...');
 
       try {
-        const layersToSave = [];
+        const layersArray = localDrafts.getLayers();
+        debugLog(`Capas a procesar: ${layersArray.length}`);
         
-        localDrafts.eachLayer(layer => {
-          const geojson = layerToGeoJSON(layer, layer.geometryType);
-          if (geojson) {
-            layersToSave.push({ layer, geojson });
-          } else {
-            console.warn('⚠️ No se pudo convertir capa:', layer);
-          }
-        });
-
-        if (layersToSave.length === 0) {
-          alert('No hay geometrías válidas para guardar');
+        if (layersArray.length === 0) {
+          alert('No hay geometrías para guardar');
           btn.disabled = false;
           btn.textContent = originalText;
           return;
         }
 
-        console.log('💾 Guardando', layersToSave.length, 'geometrías...');
+        const validLayers = [];
+        const invalidLayers = [];
+        
+        // Validar cada capa
+        layersArray.forEach((layer, index) => {
+          debugLog(`Procesando capa ${index + 1}/${layersArray.length}...`);
+          
+          const geojson = layerToGeoJSON(layer, layer.geometryType);
+          
+          if (geojson && geojson.geometry && geojson.geometry.coordinates) {
+            validLayers.push({ layer, geojson });
+            debugLog(`  ✓ Capa ${index + 1} válida`, 'success');
+          } else {
+            invalidLayers.push({ layer, index });
+            debugLog(`  ✗ Capa ${index + 1} inválida`, 'error');
+          }
+        });
 
-        const promises = layersToSave.map(({ geojson }) => 
-          addDoc(collection(db, "geometrias"), {
-            feature: geojson,
-            autor: miNombre,
-            fecha: new Date().toLocaleString('es-CL', { 
-              timeZone: 'America/Santiago',
-              dateStyle: 'short',
-              timeStyle: 'short'
-            }),
-            timestamp: serverTimestamp()
-          })
-        );
+        if (validLayers.length === 0) {
+          alert('No hay geometrías válidas para guardar');
+          debugLog('Sin geometrías válidas', 'error');
+          btn.disabled = false;
+          btn.textContent = originalText;
+          return;
+        }
+
+        if (invalidLayers.length > 0) {
+          debugLog(`⚠️ ${invalidLayers.length} geometrías inválidas fueron omitidas`, 'warning');
+        }
+
+        debugLog(`Guardando ${validLayers.length} geometrías en Firebase...`);
+
+        // Guardar cada geometría individualmente para mejor control de errores
+        let savedCount = 0;
+        let failedCount = 0;
         
-        await Promise.all(promises);
+        for (const { geojson } of validLayers) {
+          try {
+            await addDoc(collection(db, "geometrias"), {
+              feature: geojson,
+              autor: miNombre,
+              fecha: new Date().toLocaleString('es-CL', { 
+                timeZone: 'America/Santiago',
+                dateStyle: 'short',
+                timeStyle: 'short'
+              }),
+              timestamp: serverTimestamp()
+            });
+            savedCount++;
+            debugLog(`  ✓ Guardado ${savedCount}/${validLayers.length}`, 'success');
+          } catch (saveError) {
+            failedCount++;
+            debugLog(`  ✗ Error guardando: ${saveError.message}`, 'error');
+            console.error('Error detallado:', saveError, geojson);
+          }
+        }
+
+        if (savedCount > 0) {
+          // Limpiar solo las capas guardadas exitosamente
+          localDrafts.clearLayers();
+          pendingChanges = 0;
+          updateSaveButton();
+          
+          debugLog(`✅ Guardadas ${savedCount} de ${validLayers.length} geometrías`, 'success');
+          
+          btn.textContent = `✓ Guardado (${savedCount})`;
+          btn.style.background = "#27ae60";
+          setTimeout(() => {
+            btn.textContent = "💾 Guardar Cambios";
+            btn.style.background = "";
+          }, 3000);
+        }
         
-        console.log('✅ Guardado exitoso');
-        
-        // Limpiar capas locales
-        localDrafts.clearLayers();
-        pendingChanges = 0;
-        updateSaveButton();
-        
-        // Feedback visual
-        btn.textContent = "✓ Guardado exitoso";
-        btn.style.background = "#27ae60";
-        setTimeout(() => {
-          btn.textContent = "💾 Guardar Cambios";
-          btn.style.background = "";
-        }, 2000);
+        if (failedCount > 0) {
+          alert(`Se guardaron ${savedCount} geometrías, pero ${failedCount} fallaron. Revisa el panel de debug.`);
+        }
         
       } catch (err) {
-        console.error("❌ Error al guardar:", err);
-        alert(`Error al guardar: ${err.message}`);
+        debugLog(`❌ ERROR CRÍTICO: ${err.message}`, 'error');
+        console.error("Error crítico:", err);
+        alert(`Error al guardar: ${err.message}\n\nRevisa el panel de debug (botón 🐛) para más detalles.`);
         btn.disabled = false;
         btn.textContent = originalText;
       }
     };
 
-    // ✅ Sincronización mejorada - Renderiza correctamente todas las geometrías
+    // ===== SINCRONIZACIÓN =====
     onSnapshot(collection(db, "geometrias"), (snapshot) => {
       cloudLayers.clearLayers();
-      let count = 0;
       let countByType = { Point: 0, LineString: 0, Polygon: 0 };
       
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (data.feature && data.feature.geometry) {
-          const geom = data.feature.geometry;
-          const geomType = geom.type;
+          const geomType = data.feature.geometry.type;
           
           try {
             const geoJsonLayer = L.geoJSON(data.feature, {
-              style: (feature) => ({
+              style: () => ({
                 color: '#3498db',
                 weight: 3,
                 fillOpacity: 0.2,
                 fillColor: '#3498db'
               }),
-              pointToLayer: (feature, latlng) => {
-                return L.marker(latlng);
-              }
+              pointToLayer: (feature, latlng) => L.marker(latlng)
             });
             
             geoJsonLayer.bindPopup(`
-              <b>Tipo:</b> ${geomType}<br>
+              <b>Tipo:</b> ${data.feature.properties?.layerType || geomType}<br>
               <b>Autor:</b> ${data.autor}<br>
               <b>Fecha:</b> ${data.fecha || 'N/A'}
             `);
             
             geoJsonLayer.addTo(cloudLayers);
             countByType[geomType] = (countByType[geomType] || 0) + 1;
-            count++;
           } catch (err) {
-            console.error('Error renderizando geometría:', err, data.feature);
+            debugLog(`Error renderizando: ${err.message}`, 'error');
           }
         }
       });
       
-      console.log('📡 Sincronizado:', countByType);
+      const total = Object.values(countByType).reduce((a, b) => a + b, 0);
       document.getElementById('status').textContent = 
-        `📡 En línea: ${countByType.Point || 0} puntos, ${countByType.LineString || 0} líneas, ${countByType.Polygon || 0} polígonos`;
+        `📡 En línea: ${countByType.Point || 0}P, ${countByType.LineString || 0}L, ${countByType.Polygon || 0}Po (${total} total)`;
+      
+      debugLog(`Sincronizado: ${total} geometrías`, 'success');
     }, (error) => {
-      console.error("❌ Error en sincronización:", error);
+      debugLog(`Error sincronización: ${error.message}`, 'error');
       document.getElementById('status').textContent = '❌ Desconectado';
     });
 
-    // ✅ Importación KML mejorada
+    // ===== IMPORTACIÓN KML =====
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -349,14 +527,12 @@
           
           let count = 0;
           kmlLayer.eachLayer(layer => {
-            // Determinar tipo de geometría
             let geomType = 'marker';
             if (layer instanceof L.Polygon) geomType = 'polygon';
             else if (layer instanceof L.Polyline) geomType = 'polyline';
             
             layer.geometryType = geomType;
             
-            // Aplicar estilo
             if (layer.setStyle) {
               layer.setStyle({ 
                 color: '#f39c12', 
@@ -372,7 +548,9 @@
           
           pendingChanges += count;
           updateSaveButton();
-          document.getElementById('status').textContent = `✓ KML cargado (${count} elementos)`;
+          
+          debugLog(`KML cargado: ${count} elementos`, 'success');
+          document.getElementById('status').textContent = `✓ KML cargado (${count})`;
           
           setTimeout(() => {
             document.getElementById('status').textContent = '📡 En línea';
@@ -380,32 +558,19 @@
         });
 
         kmlLayer.on('error', function(err) {
-          console.error("Error al parsear KML:", err);
+          debugLog(`Error KML: ${err.message}`, 'error');
           URL.revokeObjectURL(blobUrl);
-          alert("Error al cargar el archivo KML. Verifica que sea un KML válido.");
+          alert("Error al cargar el archivo KML.");
         });
 
       } catch (err) {
-        console.error("Error procesando KML:", err);
+        debugLog(`Error procesando KML: ${err.message}`, 'error');
         URL.revokeObjectURL(blobUrl);
         alert("No se pudo procesar el archivo KML.");
       }
       
       e.target.value = '';
     };
-
-    // Debug monitor
-    setInterval(() => {
-      const localCount = localDrafts.getLayers().length;
-      const cloudCount = cloudLayers.getLayers().length;
-      if (localCount > 0 || cloudCount > 0) {
-        console.log('📊 Estado:', { 
-          locales: localCount, 
-          nube: cloudCount,
-          pendientes: pendingChanges 
-        });
-      }
-    }, 10000);
   </script>
 </body>
 </html>
