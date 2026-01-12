@@ -1,39 +1,30 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GIS Pucobre v2.1</title>
-
-  <!-- Estilos base -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/css
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIS Pucobre v2.1</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    
+    <link rel="stylesheet" href="css/index.css" />
 </head>
 <body>
-  <!-- Barra de herramientas -->
-  <div id="toolbar">
-    <strong>PUCOBRE GIS</strong>
+    <div id="toolbar">
+        <strong>PUCOBRE GIS</strong>
+        <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
+        <label class="btn btn-kml" for="kmlInput">📁 Cargar KML</label>
+        <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz" />
+        <div id="userInfo"></div>
+        <span id="status" class="status">🔌 Iniciando...</span>
+    </div>
 
-    <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
-
-    <label class="btn btn-kml" for="kmlInput">📁 Cargar KML</label>
-    <!-- NOTA: Deja solo .kml para que coincida con el loader actual del index.js -->
-    <input id="kmlInput" type="file" style="display:none" accept=".kml" />
-
-    <div id="userInfo"></div>
-    <span id="status" class="status">🔌 Iniciando...</span>
-  </div>
-
-  <!-- Contenedor del mapa -->
-  <div id="map"></div>
-
-  <!-- Librerías de mapa -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet  <script src="https://cdnjs.cloudflare.com/ajax/libs/1.0.4/leaflet.draw.js</script>
-
-  <!-- Dependencias para KML: primero toGeoJSON, luego Omnivore -->
-  <!-- Estas librerías exponen objetos en window (NO son ES modules). -->
-  <script src="https://unpkg.com/togeojson@0.16.0/dist/togeojson.min.jsscript src="https://unpkg.com/leaflet-omnivore@0.3.4/leaflet-omn/script>
-
-  <!-- Tu lógica principal como módulo (usa omnivore/toGeoJSON ya cargados) -->
-  <script type="module" src=">
+    <div id="map"></div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
+    
+    <script type="module" src="js/index.js"></script>
+</body>
 </html>
