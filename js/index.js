@@ -3,18 +3,18 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-// 1. Configuración de Firebase (CORREGIDA según tu captura de pantalla)
+// 1. Configuración de Firebase (Actualizada con tus nuevos datos)
 const firebaseConfig = {
-  apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY", // Corregido: T2 en lugar de i2
+  apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY", 
   authDomain: "gis-pucobre.firebaseapp.com",
   projectId: "gis-pucobre",
-  storageBucket: "gis-pucobre.firebasestorage.app", // Actualizado según consola
+  storageBucket: "gis-pucobre.firebasestorage.app",
   messagingSenderId: "654550355942",
-  appId: "1:654550355942:web:06a8bd8614a0faa86f5027",
+  appId: "1:654550355942:web:06a8bd8014a0faa86f5027",
   measurementId: "G-2CSXPQN2SC"
 };
 
-// 2. Manejo de Identidad
+// Manejo de Identidad
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
   userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
@@ -25,12 +25,11 @@ if (!userEmail) {
   }
 }
 
-// Inicializar Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// 3. Inicialización del Mapa
+// 2. Inicialización del Mapa
 const map = L.map('map').setView([-27.366, -70.332], 14);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: '© Esri — World Imagery'
@@ -39,7 +38,7 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 const cloudLayers = L.featureGroup().addTo(map);
 const localDrafts = L.featureGroup().addTo(map);
 
-// 4. Controles de Dibujo
+// 3. Controles de Dibujo
 const drawControl = new L.Control.Draw({
   edit: { featureGroup: localDrafts },
   draw: {
@@ -51,7 +50,7 @@ const drawControl = new L.Control.Draw({
 });
 map.addControl(drawControl);
 
-// 5. Captura de Dibujo Manual
+// 4. Captura de Dibujo Manual
 map.on(L.Draw.Event.CREATED, (e) => {
   const layer = e.layer;
   const nota = prompt(`Ingrese nota técnica para este ${e.layerType}:`);
@@ -62,13 +61,13 @@ map.on(L.Draw.Event.CREATED, (e) => {
   }
 });
 
-// 6. CARGA DE KML (Corregida para visualización inmediata)
+// --- 5. LOGICA DE CARGA DE ARCHIVO KML ---
 document.getElementById('kmlInput').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  if (file.size > 102400) { // Límite 100KB
-    alert("El archivo excede los 100KB.");
+  if (file.size > 102400) { // Límite de 100kb
+    alert("El archivo supera el límite de 100KB configurado.");
     return;
   }
 
@@ -76,7 +75,7 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
   reader.onload = function(event) {
     const kmlText = event.target.result;
     
-    // omnivore.kml.parse para procesar el texto
+    // Parsear el KML usando la librería omnivore ya cargada en el HTML
     const kmlLayer = omnivore.kml.parse(kmlText);
     
     kmlLayer.on('ready', function() {
@@ -85,23 +84,22 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
         if (layer.setStyle) {
           layer.setStyle({ color: '#f1c40f', weight: 4, fillOpacity: 0.3 });
         }
-        // Metadata para Firebase
+        // Metadata para identificarlo al guardar
         layer.options.customMetadata = { comentario: "Importado: " + file.name };
         localDrafts.addLayer(layer);
       });
 
-      // Zoom a los datos importados
+      // Zoom automático a los datos cargados
       if (localDrafts.getLayers().length > 0) {
         map.fitBounds(localDrafts.getBounds());
       }
       
       actualizarBoton();
-      document.getElementById('status').textContent = `✅ KML cargado localmente`;
+      document.getElementById('status').textContent = `✅ Cargado: ${file.name}`;
     });
 
-    kmlLayer.on('error', (err) => {
-      console.error("Error omnivore:", err);
-      alert("No se pudo leer el archivo KML. Asegúrese de que sea un archivo .kml válido.");
+    kmlLayer.on('error', () => {
+      alert("Error: El archivo no es un KML válido.");
     });
   };
   reader.readAsText(file);
@@ -114,7 +112,7 @@ function actualizarBoton() {
   btn.innerHTML = total > 0 ? `💾 Guardar (${total})` : `💾 Guardar Cambios`;
 }
 
-// 7. Guardado en Firebase
+// 6. Guardado en Firebase
 document.getElementById('saveBtn').onclick = async () => {
   const btn = document.getElementById('saveBtn');
   const layers = localDrafts.getLayers();
@@ -128,22 +126,20 @@ document.getElementById('saveBtn').onclick = async () => {
       await addDoc(collection(db, "geometrias"), {
         feature: gjString,
         autor: userEmail,
-        comentario: layer.options.customMetadata?.comentario || "Importado",
+        comentario: layer.options.customMetadata?.comentario || "Sin nota",
         fecha: new Date().toLocaleString('es-CL'),
         timestamp: serverTimestamp()
       });
       localDrafts.removeLayer(layer);
     } catch (err) {
       console.error("Error al guardar:", err);
-      document.getElementById('status').textContent = `⚠️ Error al guardar`;
     }
   }
-
   btn.disabled = false;
   actualizarBoton();
 };
 
-// 8. Visualización en Tiempo Real
+// 7. Sincronización en tiempo real
 const cloudIndex = new Map();
 onSnapshot(collection(db, "geometrias"), (snap) => {
   snap.docChanges().forEach(change => {
@@ -161,16 +157,17 @@ onSnapshot(collection(db, "geometrias"), (snap) => {
       
       layer.addTo(cloudLayers);
       cloudIndex.set(id, layer);
-    } else if (change.type === "removed") {
-      const layer = cloudIndex.get(id);
-      if (layer) { cloudLayers.removeLayer(layer); cloudIndex.delete(id); }
     }
   });
   document.getElementById('status').textContent = `📡 Nube: ${snap.size}`;
 });
 
-// 9. Autenticación
-signInAnonymously(auth).catch(e => console.error("Error Auth:", e.message));
+// 8. Autenticación
+signInAnonymously(auth).catch(e => {
+  console.error("Error de Auth:", e.message);
+  document.getElementById('status').textContent = "⚠️ Error de conexión";
+});
+
 onAuthStateChanged(auth, (user) => {
   if (user) document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
 });
