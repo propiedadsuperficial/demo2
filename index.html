@@ -60,7 +60,15 @@
 
     new L.Control.Draw({
       edit: { featureGroup: localDrafts },
-      draw: { circle: false, circlemarker: false }
+      draw: { 
+        circle: false, 
+        circlemarker: false,
+        // Configuración explícita para asegurar que las geometrías se dibujen correctamente
+        polyline: { shapeOptions: { color: '#f39c12', weight: 4 } },
+        polygon: { shapeOptions: { color: '#f39c12', weight: 4, fillOpacity: 0.3 } },
+        rectangle: { shapeOptions: { color: '#f39c12', weight: 4, fillOpacity: 0.3 } },
+        marker: true
+      }
     }).addTo(map);
 
     // Contador de capas pendientes
@@ -79,28 +87,55 @@
       }
     }
 
-    // Dibujo creado
+    // ✅ FIX PRINCIPAL: Dibujo creado - Manejo correcto de todas las geometrías
     map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
-      layer.setStyle({ color: '#f39c12', weight: 4, fillOpacity: 0.3 }); 
+      const type = e.layerType;
+      
+      console.log('Geometría creada:', type, layer); // Debug
+      
+      // Aplicar estilos según el tipo de geometría
+      if (type === 'polyline' || type === 'polygon' || type === 'rectangle') {
+        layer.setStyle({ 
+          color: '#f39c12', 
+          weight: 4, 
+          fillOpacity: 0.3,
+          fillColor: '#f39c12'
+        });
+      }
+      
+      // ✅ CRÍTICO: Agregar la capa al grupo Y al mapa explícitamente
       localDrafts.addLayer(layer);
+      
+      // Forzar redibujado
+      if (layer._path) {
+        layer._path.setAttribute('stroke', '#f39c12');
+        layer._path.setAttribute('fill', '#f39c12');
+      }
+      
       pendingChanges++;
       updateSaveButton();
+      
+      console.log('Capa agregada. Total pendientes:', pendingChanges); // Debug
     });
 
     // Geometría editada
     map.on(L.Draw.Event.EDITED, (e) => {
+      const layers = e.layers;
+      console.log('Geometrías editadas:', layers.getLayers().length); // Debug
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
     // Geometría eliminada
     map.on(L.Draw.Event.DELETED, (e) => {
+      const layers = e.layers;
+      console.log('Geometrías eliminadas:', layers.getLayers().length); // Debug
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
-    // Botón de guardado - FIX: Ya no se queda pegado
+    // Botón de guardado
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const originalText = btn.textContent;
@@ -118,6 +153,8 @@
           btn.textContent = originalText;
           return;
         }
+
+        console.log('Guardando', layersToSave.length, 'geometrías...'); // Debug
 
         const promises = layersToSave.map(layer => 
           addDoc(collection(db, "geometrias"), {
@@ -150,57 +187,72 @@
       }
     };
 
-    // Sincronización en tiempo real
+    // Sincronización en tiempo real - ✅ Mejorado para manejar todas las geometrías
     onSnapshot(collection(db, "geometrias"), (snapshot) => {
       cloudLayers.clearLayers();
+      let count = 0;
+      
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (data.feature) {
-          L.geoJSON(data.feature, {
-            style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
+          const geoJsonLayer = L.geoJSON(data.feature, {
+            style: (feature) => {
+              // Estilo diferenciado según tipo de geometría
+              const baseStyle = { 
+                color: '#3498db', 
+                weight: 3, 
+                fillOpacity: 0.2,
+                fillColor: '#3498db'
+              };
+              
+              return baseStyle;
+            },
+            pointToLayer: (feature, latlng) => {
+              return L.marker(latlng);
+            }
           }).bindPopup(`
             <b>Autor:</b> ${data.autor}<br>
             <b>Fecha:</b> ${data.fecha || 'N/A'}
-          `).addTo(cloudLayers);
+          `);
+          
+          geoJsonLayer.addTo(cloudLayers);
+          count++;
         }
       });
-      document.getElementById('status').textContent = '📡 En línea';
+      
+      console.log('Sincronizado:', count, 'geometrías desde Firebase'); // Debug
+      document.getElementById('status').textContent = `📡 En línea (${count} geometrías)`;
     }, (error) => {
       console.error("Error en sincronización:", error);
       document.getElementById('status').textContent = '❌ Desconectado';
     });
 
-    // Importación KML - FIX: Carga correcta usando Blob URL
+    // Importación KML
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
-      // Crear URL temporal del archivo
       const blobUrl = URL.createObjectURL(file);
       
       try {
-        // Parsear KML desde URL usando omnivore
         const kmlLayer = omnivore.kml(blobUrl);
         
         kmlLayer.on('ready', function() {
-          // Liberar URL temporal
           URL.revokeObjectURL(blobUrl);
           
-          // Ajustar vista al contenido del KML
           const bounds = kmlLayer.getBounds();
           if (bounds.isValid()) {
             map.fitBounds(bounds);
           }
           
           let count = 0;
-          // Agregar cada capa al grupo de borradores locales
           kmlLayer.eachLayer(layer => {
-            // Aplicar estilo naranja para indicar que está pendiente de guardar
             if (layer.setStyle) {
               layer.setStyle({ 
                 color: '#f39c12', 
                 weight: 4,
-                fillOpacity: 0.3 
+                fillOpacity: 0.3,
+                fillColor: '#f39c12'
               });
             }
             localDrafts.addLayer(layer);
@@ -211,7 +263,6 @@
           updateSaveButton();
           document.getElementById('status').textContent = `✓ KML cargado (${count} elementos)`;
           
-          // Resetear después de 3 segundos
           setTimeout(() => {
             document.getElementById('status').textContent = '📡 En línea';
           }, 3000);
@@ -229,9 +280,15 @@
         alert("No se pudo procesar el archivo KML.");
       }
       
-      // Resetear input para permitir cargar el mismo archivo nuevamente
       e.target.value = '';
     };
+
+    // ✅ DEBUG: Log de capas en tiempo real
+    setInterval(() => {
+      const localCount = localDrafts.getLayers().length;
+      const cloudCount = cloudLayers.getLayers().length;
+      console.log('Estado:', { locales: localCount, nube: cloudCount });
+    }, 5000);
   </script>
 </body>
 </html>
