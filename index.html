@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
   <style>
     html, body { height: 100%; margin: 0; font-family: 'Segoe UI', sans-serif; }
-    #toolbar { padding: 10px; background: #2c3e50; color: white; display: flex; gap: 10px; align-items: center; }
+    #toolbar { padding: 10px; background: #2c3e50; color: white; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     #map { width: 100%; height: calc(100% - 60px); background: #eee; }
     .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
     .btn-save { background: #27ae60; color: white; }
@@ -63,7 +63,6 @@
       draw: { 
         circle: false, 
         circlemarker: false,
-        // Configuración explícita para asegurar que las geometrías se dibujen correctamente
         polyline: { shapeOptions: { color: '#f39c12', weight: 4 } },
         polygon: { shapeOptions: { color: '#f39c12', weight: 4, fillOpacity: 0.3 } },
         rectangle: { shapeOptions: { color: '#f39c12', weight: 4, fillOpacity: 0.3 } },
@@ -87,15 +86,100 @@
       }
     }
 
-    // ✅ FIX PRINCIPAL: Dibujo creado - Manejo correcto de todas las geometrías
+    // ✅ FUNCIÓN CRÍTICA: Convierte cualquier capa de Leaflet a GeoJSON
+    function layerToGeoJSON(layer, layerType) {
+      try {
+        // Para markers (puntos)
+        if (layerType === 'marker' || layer instanceof L.Marker) {
+          const latlng = layer.getLatLng();
+          return {
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: [latlng.lng, latlng.lat]
+            },
+            properties: { layerType: 'marker' }
+          };
+        }
+        
+        // Para polylines (líneas)
+        if (layerType === 'polyline' || layer instanceof L.Polyline) {
+          const latlngs = layer.getLatLngs();
+          const coordinates = latlngs.map(ll => [ll.lng, ll.lat]);
+          return {
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: coordinates
+            },
+            properties: { layerType: 'polyline' }
+          };
+        }
+        
+        // Para polygons (polígonos libres)
+        if (layerType === 'polygon' || (layer instanceof L.Polygon && !(layer instanceof L.Rectangle))) {
+          const latlngs = layer.getLatLngs()[0]; // Primer anillo del polígono
+          const coordinates = latlngs.map(ll => [ll.lng, ll.lat]);
+          // Cerrar el polígono si no está cerrado
+          if (JSON.stringify(coordinates[0]) !== JSON.stringify(coordinates[coordinates.length - 1])) {
+            coordinates.push(coordinates[0]);
+          }
+          return {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [coordinates]
+            },
+            properties: { layerType: 'polygon' }
+          };
+        }
+        
+        // Para rectangles (rectángulos)
+        if (layerType === 'rectangle' || layer instanceof L.Rectangle) {
+          const bounds = layer.getBounds();
+          const sw = bounds.getSouthWest();
+          const ne = bounds.getNorthEast();
+          const nw = L.latLng(ne.lat, sw.lng);
+          const se = L.latLng(sw.lat, ne.lng);
+          
+          const coordinates = [
+            [sw.lng, sw.lat],
+            [se.lng, se.lat],
+            [ne.lng, ne.lat],
+            [nw.lng, nw.lat],
+            [sw.lng, sw.lat] // Cerrar el rectángulo
+          ];
+          
+          return {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [coordinates]
+            },
+            properties: { layerType: 'rectangle' }
+          };
+        }
+        
+        // Fallback: intentar toGeoJSON nativo
+        return layer.toGeoJSON();
+        
+      } catch (error) {
+        console.error('Error convirtiendo capa a GeoJSON:', error, layer);
+        return null;
+      }
+    }
+
+    // ✅ Dibujo creado - Con conversión mejorada
     map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
       const type = e.layerType;
       
-      console.log('Geometría creada:', type, layer); // Debug
+      console.log('✏️ Geometría creada:', type);
       
-      // Aplicar estilos según el tipo de geometría
-      if (type === 'polyline' || type === 'polygon' || type === 'rectangle') {
+      // Aplicar estilos según el tipo
+      if (type === 'polyline') {
+        layer.setStyle({ color: '#f39c12', weight: 4 });
+      } else if (type === 'polygon' || type === 'rectangle') {
         layer.setStyle({ 
           color: '#f39c12', 
           weight: 4, 
@@ -104,38 +188,33 @@
         });
       }
       
-      // ✅ CRÍTICO: Agregar la capa al grupo Y al mapa explícitamente
+      // Agregar al grupo de borradores
       localDrafts.addLayer(layer);
       
-      // Forzar redibujado
-      if (layer._path) {
-        layer._path.setAttribute('stroke', '#f39c12');
-        layer._path.setAttribute('fill', '#f39c12');
-      }
+      // Guardar el tipo de geometría en la capa para referencia
+      layer.geometryType = type;
       
       pendingChanges++;
       updateSaveButton();
       
-      console.log('Capa agregada. Total pendientes:', pendingChanges); // Debug
+      console.log('✅ Capa agregada. Pendientes:', pendingChanges);
     });
 
     // Geometría editada
     map.on(L.Draw.Event.EDITED, (e) => {
-      const layers = e.layers;
-      console.log('Geometrías editadas:', layers.getLayers().length); // Debug
+      console.log('✏️ Geometrías editadas');
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
     // Geometría eliminada
     map.on(L.Draw.Event.DELETED, (e) => {
-      const layers = e.layers;
-      console.log('Geometrías eliminadas:', layers.getLayers().length); // Debug
+      console.log('🗑️ Geometrías eliminadas');
       pendingChanges = localDrafts.getLayers().length;
       updateSaveButton();
     });
 
-    // Botón de guardado
+    // ✅ Botón de guardado - Con conversión mejorada
     document.getElementById('saveBtn').onclick = async () => {
       const btn = document.getElementById('saveBtn');
       const originalText = btn.textContent;
@@ -145,89 +224,112 @@
 
       try {
         const layersToSave = [];
+        
         localDrafts.eachLayer(layer => {
-          layersToSave.push(layer);
+          const geojson = layerToGeoJSON(layer, layer.geometryType);
+          if (geojson) {
+            layersToSave.push({ layer, geojson });
+          } else {
+            console.warn('⚠️ No se pudo convertir capa:', layer);
+          }
         });
 
         if (layersToSave.length === 0) {
+          alert('No hay geometrías válidas para guardar');
+          btn.disabled = false;
           btn.textContent = originalText;
           return;
         }
 
-        console.log('Guardando', layersToSave.length, 'geometrías...'); // Debug
+        console.log('💾 Guardando', layersToSave.length, 'geometrías...');
 
-        const promises = layersToSave.map(layer => 
+        const promises = layersToSave.map(({ geojson }) => 
           addDoc(collection(db, "geometrias"), {
-            feature: layer.toGeoJSON(),
+            feature: geojson,
             autor: miNombre,
-            fecha: new Date().toLocaleString(),
+            fecha: new Date().toLocaleString('es-CL', { 
+              timeZone: 'America/Santiago',
+              dateStyle: 'short',
+              timeStyle: 'short'
+            }),
             timestamp: serverTimestamp()
           })
         );
         
         await Promise.all(promises);
         
-        // Limpiar capas locales y resetear contador
+        console.log('✅ Guardado exitoso');
+        
+        // Limpiar capas locales
         localDrafts.clearLayers();
         pendingChanges = 0;
         updateSaveButton();
         
         // Feedback visual
-        btn.textContent = "✓ Guardado";
+        btn.textContent = "✓ Guardado exitoso";
         btn.style.background = "#27ae60";
         setTimeout(() => {
           btn.textContent = "💾 Guardar Cambios";
+          btn.style.background = "";
         }, 2000);
         
       } catch (err) {
-        console.error("Error al guardar:", err);
-        alert("Error al guardar. Verifica tu conexión.");
+        console.error("❌ Error al guardar:", err);
+        alert(`Error al guardar: ${err.message}`);
         btn.disabled = false;
         btn.textContent = originalText;
       }
     };
 
-    // Sincronización en tiempo real - ✅ Mejorado para manejar todas las geometrías
+    // ✅ Sincronización mejorada - Renderiza correctamente todas las geometrías
     onSnapshot(collection(db, "geometrias"), (snapshot) => {
       cloudLayers.clearLayers();
       let count = 0;
+      let countByType = { Point: 0, LineString: 0, Polygon: 0 };
       
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        if (data.feature) {
-          const geoJsonLayer = L.geoJSON(data.feature, {
-            style: (feature) => {
-              // Estilo diferenciado según tipo de geometría
-              const baseStyle = { 
-                color: '#3498db', 
-                weight: 3, 
+        if (data.feature && data.feature.geometry) {
+          const geom = data.feature.geometry;
+          const geomType = geom.type;
+          
+          try {
+            const geoJsonLayer = L.geoJSON(data.feature, {
+              style: (feature) => ({
+                color: '#3498db',
+                weight: 3,
                 fillOpacity: 0.2,
                 fillColor: '#3498db'
-              };
-              
-              return baseStyle;
-            },
-            pointToLayer: (feature, latlng) => {
-              return L.marker(latlng);
-            }
-          }).bindPopup(`
-            <b>Autor:</b> ${data.autor}<br>
-            <b>Fecha:</b> ${data.fecha || 'N/A'}
-          `);
-          
-          geoJsonLayer.addTo(cloudLayers);
-          count++;
+              }),
+              pointToLayer: (feature, latlng) => {
+                return L.marker(latlng);
+              }
+            });
+            
+            geoJsonLayer.bindPopup(`
+              <b>Tipo:</b> ${geomType}<br>
+              <b>Autor:</b> ${data.autor}<br>
+              <b>Fecha:</b> ${data.fecha || 'N/A'}
+            `);
+            
+            geoJsonLayer.addTo(cloudLayers);
+            countByType[geomType] = (countByType[geomType] || 0) + 1;
+            count++;
+          } catch (err) {
+            console.error('Error renderizando geometría:', err, data.feature);
+          }
         }
       });
       
-      console.log('Sincronizado:', count, 'geometrías desde Firebase'); // Debug
-      document.getElementById('status').textContent = `📡 En línea (${count} geometrías)`;
+      console.log('📡 Sincronizado:', countByType);
+      document.getElementById('status').textContent = 
+        `📡 En línea: ${countByType.Point || 0} puntos, ${countByType.LineString || 0} líneas, ${countByType.Polygon || 0} polígonos`;
     }, (error) => {
-      console.error("Error en sincronización:", error);
+      console.error("❌ Error en sincronización:", error);
       document.getElementById('status').textContent = '❌ Desconectado';
     });
 
-    // Importación KML
+    // ✅ Importación KML mejorada
     document.getElementById('kmlInput').onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -247,6 +349,14 @@
           
           let count = 0;
           kmlLayer.eachLayer(layer => {
+            // Determinar tipo de geometría
+            let geomType = 'marker';
+            if (layer instanceof L.Polygon) geomType = 'polygon';
+            else if (layer instanceof L.Polyline) geomType = 'polyline';
+            
+            layer.geometryType = geomType;
+            
+            // Aplicar estilo
             if (layer.setStyle) {
               layer.setStyle({ 
                 color: '#f39c12', 
@@ -255,6 +365,7 @@
                 fillColor: '#f39c12'
               });
             }
+            
             localDrafts.addLayer(layer);
             count++;
           });
@@ -283,12 +394,18 @@
       e.target.value = '';
     };
 
-    // ✅ DEBUG: Log de capas en tiempo real
+    // Debug monitor
     setInterval(() => {
       const localCount = localDrafts.getLayers().length;
       const cloudCount = cloudLayers.getLayers().length;
-      console.log('Estado:', { locales: localCount, nube: cloudCount });
-    }, 5000);
+      if (localCount > 0 || cloudCount > 0) {
+        console.log('📊 Estado:', { 
+          locales: localCount, 
+          nube: cloudCount,
+          pendientes: pendingChanges 
+        });
+      }
+    }, 10000);
   </script>
 </body>
 </html>
