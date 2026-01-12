@@ -11,48 +11,48 @@ const firebaseConfig = {
     appId: "1:654550355942:web:06a8bd8614a0faa86f5027"
 };
 
-// 1. Manejo de Usuario (Prompt Obligatorio)
+// 1. Manejo de Identidad (Persistente)
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
-    userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo:");
-    if (!userEmail || !userEmail.includes('@')) window.location.reload();
-    else localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
+    userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
+    if (!userEmail || !userEmail.includes('@')) {
+        window.location.reload();
+    } else {
+        localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
+    }
 }
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// 2. Configuración del Mapa
+// 2. Inicialización del Mapa
 const map = L.map('map').setView([-27.366, -70.332], 14);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
 
 const cloudLayers = L.featureGroup().addTo(map);
 const localDrafts = L.featureGroup().addTo(map);
 
-// 3. Herramientas de Dibujo
+// 3. Controles de Dibujo (Habilitados para Polígonos y Líneas)
 const drawControl = new L.Control.Draw({
     edit: { featureGroup: localDrafts },
     draw: { 
         circle: false, circlemarker: false,
-        polyline: { shapeOptions: { color: '#f1c40f', weight: 4 } },
-        polygon: { shapeOptions: { color: '#f1c40f', fillOpacity: 0.3 } },
+        polyline: { shapeOptions: { color: '#f1c40f', weight: 5 } },
+        polygon: { shapeOptions: { color: '#f1c40f', fillOpacity: 0.4 } },
         marker: true 
     }
 });
 map.addControl(drawControl);
 
-// 4. Captura de Dibujos y Comentarios Técnicos
+// 4. Captura de Dibujo y Comentario Técnico
 map.on(L.Draw.Event.CREATED, (e) => {
     const layer = e.layer;
-    const nota = prompt(`Nota técnica para este ${e.layerType}:`);
+    const nota = prompt(`Ingrese nota técnica para este ${e.layerType}:`);
     
     if (nota !== null) {
-        // CORRECCIÓN: Guardamos la nota dentro de la capa para que no se pierda al procesar
-        layer.options.customMetadata = {
-            comentario: nota || "Sin comentario",
-            tipo: e.layerType
-        };
+        // Almacenamos la nota dentro del objeto layer
+        layer.options.customMetadata = { comentario: nota || "Sin comentario" };
         localDrafts.addLayer(layer);
         actualizarBoton();
     }
@@ -65,7 +65,7 @@ function actualizarBoton() {
     btn.innerHTML = total > 0 ? `💾 Guardar (${total})` : `💾 Guardar Cambios`;
 }
 
-// 5. Guardado Masivo (Puntos, Líneas y Polígonos)
+// 5. Función de Guardado Universal (Soporta todas las formas)
 document.getElementById('saveBtn').onclick = async () => {
     const btn = document.getElementById('saveBtn');
     const layers = localDrafts.getLayers();
@@ -75,37 +75,43 @@ document.getElementById('saveBtn').onclick = async () => {
     for (const layer of layers) {
         try {
             await addDoc(collection(db, "geometrias"), {
-                feature: layer.toGeoJSON(), // Convierte cualquier forma a JSON
+                feature: layer.toGeoJSON(), // Captura puntos, líneas y polígonos
                 autor: userEmail,
-                comentario: layer.options.customMetadata.comentario,
+                comentario: layer.options.customMetadata?.comentario || "Sin nota",
                 fecha: new Date().toLocaleString('es-CL'),
                 timestamp: serverTimestamp()
             });
             localDrafts.removeLayer(layer);
-        } catch (err) { console.error("Error:", err); }
+        } catch (err) {
+            console.error("Error al guardar:", err);
+        }
     }
     actualizarBoton();
 };
 
-// 6. Lectura en Tiempo Real
+// 6. Carga de Datos en Tiempo Real
 onSnapshot(collection(db, "geometrias"), (snap) => {
     cloudLayers.clearLayers();
-    snap.forEach(doc => {
-        const data = doc.data();
+    snap.forEach(docSnap => {
+        const data = docSnap.data();
         L.geoJSON(data.feature, {
             style: { color: '#3498db', weight: 3, fillOpacity: 0.2 },
             pointToLayer: (f, latlng) => L.marker(latlng)
         }).bindPopup(`
-            <strong>Nota:</strong> ${data.comentario}<br>
-            <hr>
-            <small>Responsable: ${data.autor}</small>
+            <div style="font-family: sans-serif;">
+                <strong>Nota Técnica:</strong><br>${data.comentario}<br>
+                <hr style="margin: 5px 0;">
+                <small>Responsable: ${data.autor}</small>
+            </div>
         `).addTo(cloudLayers);
     });
-    document.getElementById('status').innerHTML = `📡 Nube: ${snap.size} objetos`;
+    document.getElementById('status').innerHTML = `📡 Conectado | Nube: ${snap.size}`;
 });
 
-// Autenticación para evitar el "Permission Denied" de tus fotos
+// 7. Autenticación para evitar error de permisos
 signInAnonymously(auth);
 onAuthStateChanged(auth, (user) => {
-    if(user) document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
+    if (user) {
+        document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
+    }
 });
