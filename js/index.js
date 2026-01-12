@@ -3,7 +3,18 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-// Configuración de Firebase corregida
+// --- 0. PARÁMETROS DINÁMICOS DESDE URL (SharePoint) ---
+const urlParams = new URLSearchParams(window.location.search);
+
+// Nombre del proyecto (ID para la base de datos)
+const proyectoID = urlParams.get('area') || 'general';
+
+// Configuración de vista inicial
+const latInicial = parseFloat(urlParams.get('lat')) || -27.366;
+const lngInicial = parseFloat(urlParams.get('lng')) || -70.332;
+const zoomInicial = parseInt(urlParams.get('zoom')) || 14;
+
+// 1. Configuración de Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
@@ -13,7 +24,7 @@ const firebaseConfig = {
   appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
 };
 
-// 1. Manejo de Identidad
+// Manejo de Identidad
 let userEmail = localStorage.getItem('pucobre_user');
 if (!userEmail) {
   userEmail = prompt("Sesión GIS Pucobre. Ingrese su correo corporativo:");
@@ -28,8 +39,8 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// 2. Inicialización del Mapa
-const map = L.map('map').setView([-27.366, -70.332], 14);
+// 2. Inicialización del Mapa con Coordenadas Dinámicas
+const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: '© Esri — World Imagery'
 }).addTo(map);
@@ -88,7 +99,7 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
   reader.readAsText(file);
 });
 
-// 6. Guardado en Firebase
+// 6. Guardado en Firebase (Dinámico por Proyecto)
 document.getElementById('saveBtn').onclick = async () => {
   const btn = document.getElementById('saveBtn');
   const layers = localDrafts.getLayers();
@@ -97,7 +108,8 @@ document.getElementById('saveBtn').onclick = async () => {
   for (const layer of layers) {
     try {
       const gjString = JSON.stringify(layer.toGeoJSON());
-      await addDoc(collection(db, "geometrias"), {
+      // Guardamos en una colección específica del proyecto
+      await addDoc(collection(db, `geometrias_${proyectoID}`), {
         feature: gjString,
         autor: userEmail,
         comentario: layer.options.customMetadata?.comentario || "Importado",
@@ -113,21 +125,20 @@ document.getElementById('saveBtn').onclick = async () => {
   actualizarBoton();
 };
 
-// 7. Sincronización Nube
-onSnapshot(collection(db, "geometrias"), (snap) => {
-  snap.docChanges().forEach(change => {
-    if (change.type === "added") {
-      const data = change.doc.data();
+// 7. Sincronización Nube (Dinámica por Proyecto)
+onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
+  cloudLayers.clearLayers(); // Limpiar para refrescar vista
+  snap.forEach(doc => {
+      const data = doc.data();
       const feat = JSON.parse(data.feature);
       L.geoJSON(feat, {
         style: { color: '#3498db', weight: 3, fillOpacity: 0.2 }
       }).bindPopup(`<b>${data.comentario}</b><br><small>${data.autor}</small>`).addTo(cloudLayers);
-    }
   });
-  document.getElementById('status').textContent = `📡 Nube: ${snap.size}`;
+  document.getElementById('status').textContent = `📍 Proyecto: ${proyectoID.toUpperCase()} | Nube: ${snap.size}`;
 });
 
 signInAnonymously(auth);
 onAuthStateChanged(auth, (user) => {
-  if (user) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`;
+  if (user) document.getElementById('userInfo').innerHTML = `<span class="badge-user">👤 ${userEmail}</span>`;
 });
