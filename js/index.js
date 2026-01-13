@@ -2,18 +2,13 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-// ============================================================================
-// 1. CAPTURA DE PARÁMETROS URL (LÍNEA RECUPERADA)
-// ============================================================================
+// 0. CONFIGURACIÓN Y PARÁMETROS URL
 const urlParams = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') || 'general';
 const latInicial = parseFloat(urlParams.get('lat')) || -27.366;
 const lngInicial = parseFloat(urlParams.get('lng')) || -70.332;
 const zoomInicial = parseInt(urlParams.get('zoom')) || 14;
 
-// ============================================================================
-// 2. CONFIGURACIÓN FIREBASE E IDENTIDAD
-// ============================================================================
 const firebaseConfig = {
     apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
     authDomain: "gis-pucobre.firebaseapp.com",
@@ -27,61 +22,48 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-let userEmail = localStorage.getItem('pucobre_user') || prompt("Ingrese correo Pucobre:");
+let userEmail = localStorage.getItem('pucobre_user') || prompt("Ingrese correo corporativo:");
 if (userEmail && userEmail.includes('@')) {
     localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
 } else {
     alert("Acceso denegado."); throw new Error("Sin auth");
 }
 
-// ============================================================================
-// 3. INICIALIZACIÓN DEL MAPA (CON PARÁMETROS DINÁMICOS)
-// ============================================================================
+// 1. INICIALIZACIÓN DE MAPA
 const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri — Pucobre'
+    attribution: '© Esri — Pucobre', maxZoom: 19
 }).addTo(map);
 
-const localDrafts = L.featureGroup().addTo(map); 
-const docMap = new Map(); 
-const gruposPorAutor = {}; 
-let selectedLayer = null; // Puntero de selección Cyan
+const localDrafts = L.featureGroup().addTo(map);
+const docMap = new Map();
+const gruposPorAutor = {};
+let selectedLayer = null; // Puntero Cyan
 
-// TOC Flotante a la derecha (Como en tus capturas)
 let layerControl = L.control.layers(null, null, { collapsed: false, position: 'topright' }).addTo(map);
 
-// ============================================================================
-// 4. LÓGICA DE SELECCIÓN (PUNTERO CYAN)
-// ============================================================================
+// 2. FUNCIÓN DE SELECCIÓN (CYAN)
 function seleccionarGeometria(e) {
     const layer = e.target;
-    
-    // Restaurar color del anterior
     if (selectedLayer) {
         const esMio = selectedLayer.options.customMetadata?.autor === userEmail;
         selectedLayer.setStyle({ color: esMio ? '#27ae60' : '#3498db', weight: 2 });
     }
-
-    // Aplicar CYAN al seleccionado
     selectedLayer = layer;
     layer.setStyle({ color: '#00ffff', weight: 4, fillOpacity: 0.4 });
-    
-    // Evitar que el click se propague al mapa
     L.DomEvent.stopPropagation(e);
 }
 
-// ============================================================================
-// 5. HERRAMIENTAS DE EDICIÓN Y DIBUJO
-// ============================================================================
+// 3. HERRAMIENTAS DE DIBUJO Y EDICIÓN
 const drawControl = new L.Control.Draw({
     edit: { featureGroup: localDrafts, remove: true },
-    draw: { marker: true, polyline: true, polygon: true, rectangle: true, circle: false, circlemarker: false }
+    draw: { circle: false, circlemarker: false }
 });
 map.addControl(drawControl);
 
 map.on(L.Draw.Event.CREATED, (e) => {
     const layer = e.layer;
-    layer.options.customMetadata = { comentario: prompt("Descripción del objeto:") || "Nuevo", autor: userEmail };
+    layer.options.customMetadata = { comentario: prompt("Descripción:"), autor: userEmail };
     layer.on('click', seleccionarGeometria);
     localDrafts.addLayer(layer);
     actualizarBoton();
@@ -96,61 +78,48 @@ map.on(L.Draw.Event.DELETED, async (e) => {
         if (dbId && autor === userEmail) {
             await deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId));
         } else if (dbId) {
-            alert("No tienes permiso para borrar elementos ajenos.");
-            location.reload(); 
+            alert("No puedes borrar capas de otros autores.");
+            location.reload();
         }
     });
     actualizarBoton();
 });
 
-// ============================================================================
-// 6. SINCRONIZACIÓN FIREBASE
-// ============================================================================
+// 4. SINCRONIZACIÓN NUBE
 onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
-    // Limpieza de TOC
     for (let a in gruposPorAutor) {
         map.removeLayer(gruposPorAutor[a]);
         layerControl.removeLayer(gruposPorAutor[a]);
         delete gruposPorAutor[a];
     }
-
-    snap.forEach(docSnap => {
-        const data = docSnap.data();
+    snap.forEach(d => {
+        const data = d.data();
         const autor = data.autor;
-
         if (!gruposPorAutor[autor]) {
             gruposPorAutor[autor] = L.featureGroup().addTo(map);
-            const label = (autor === userEmail) ? `⭐ MIS CAPAS (${snap.size})` : `👤 ${autor}`;
+            const label = (autor === userEmail) ? `<b>⭐ MIS CAPAS (${snap.size})</b>` : `👤 ${autor}`;
             layerControl.addOverlay(gruposPorAutor[autor], label);
         }
-
         const geoJSON = JSON.parse(data.feature);
         const lg = L.geoJSON(geoJSON, {
-            style: { color: autor === userEmail ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.2 }
+            style: { color: autor === userEmail ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
         });
-
         lg.eachLayer(l => {
-            docMap.set(l._leaflet_id, docSnap.id);
-            l.options.customMetadata = { autor: autor, dbId: docSnap.id };
+            docMap.set(l._leaflet_id, d.id);
+            l.options.customMetadata = { autor: autor, dbId: d.id };
             l.on('click', seleccionarGeometria);
             l.bindPopup(`<b>${data.comentario}</b><br>Autor: ${autor}`);
             l.addTo(gruposPorAutor[autor]);
-            if (autor === userEmail) l.addTo(localDrafts); 
+            if (autor === userEmail) l.addTo(localDrafts);
         });
     });
-    
-    // Actualizar indicador de área en el toolbar
-    const statusEl = document.getElementById('status');
-    if (statusEl) statusEl.innerHTML = `📍 ÁREA: ${proyectoID.toUpperCase()} | ☁️ Nube: ${snap.size}`;
+    document.getElementById('status').textContent = `📡 ÁREA: ${proyectoID.toUpperCase()} | Total: ${snap.size}`;
 });
 
-// ============================================================================
-// 7. GUARDAR CAMBIOS (NUEVOS Y EDITADOS)
-// ============================================================================
+// 5. GUARDAR / ACTUALIZAR
 document.getElementById('saveBtn').onclick = async () => {
     const layers = localDrafts.getLayers();
     document.getElementById('saveBtn').disabled = true;
-
     for (const layer of layers) {
         const dbId = docMap.get(layer._leaflet_id);
         const payload = {
@@ -160,34 +129,25 @@ document.getElementById('saveBtn').onclick = async () => {
             fecha: new Date().toLocaleString('es-CL'),
             timestamp: serverTimestamp()
         };
-
-        if (dbId) {
-            await updateDoc(doc(db, `geometrias_${proyectoID}`, dbId), payload);
-        } else {
-            await addDoc(collection(db, `geometrias_${proyectoID}`), payload);
-        }
+        if (dbId) await updateDoc(doc(db, `geometrias_${proyectoID}`, dbId), payload);
+        else await addDoc(collection(db, `geometrias_${proyectoID}`), payload);
     }
     actualizarBoton();
 };
 
 function actualizarBoton() {
     const n = localDrafts.getLayers().length;
-    const btn = document.getElementById('saveBtn');
-    if (btn) {
-        btn.disabled = n === 0;
-        btn.innerHTML = `💾 Guardar Cambios (${n})`;
-    }
+    document.getElementById('saveBtn').disabled = n === 0;
+    document.getElementById('saveBtn').innerHTML = `💾 Guardar Cambios (${n})`;
 }
 
-// Carga KML (Con auto-reparación xsi de ArcMap)
+// Carga KML con reparación xsi
 document.getElementById('kmlInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onload = (event) => {
         let content = event.target.result;
-        if (content.includes('xsi')) {
-             content = content.replace(/<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
-        }
+        if (content.includes('xsi')) content = content.replace(/<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
         const layer = omnivore.kml.parse(content);
         layer.on('ready', () => {
             layer.eachLayer(l => {
@@ -203,6 +163,4 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
 });
 
 signInAnonymously(auth);
-onAuthStateChanged(auth, (u) => { 
-    if(u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`; 
-});
+onAuthStateChanged(auth, (u) => { if(u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`; });
