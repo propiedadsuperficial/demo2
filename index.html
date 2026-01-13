@@ -3,13 +3,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GIS Pucobre - Mapa Pantalla Completa</title>
+    <title>GIS Pucobre - Sistema de Gestión</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: sans-serif; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         
         /* BARRA SUPERIOR */
         #toolbar {
@@ -19,7 +19,7 @@
             position: relative;
         }
 
-        /* MAPA: Aquí está el truco, no debe haber contenedores padres con flex */
+        /* MAPA A PANTALLA COMPLETA (OCUPA TODO BAJO EL TOOLBAR) */
         #map { 
             height: calc(100vh - 60px); 
             width: 100vw; 
@@ -28,8 +28,12 @@
             left: 0;
         }
 
-        .btn-kml { background-color: #27ae60 !important; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; border: none; }
-        #saveBtn { background-color: #34495e; color: white; border: none; padding: 8px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        /* BOTONES INSTITUCIONALES */
+        .btn-pucobre { 
+            background-color: #27ae60; color: white; border: none; 
+            padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+        #saveBtn { background-color: #34495e; }
         #saveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .status-container { flex-grow: 1; text-align: right; font-size: 0.85em; color: #bdc3c7; }
@@ -42,10 +46,16 @@
             <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo" style="height: 25px; filter: brightness(0) invert(1);">
             <strong>GIS</strong>
         </div>
-        <button id="saveBtn" disabled>💾 Guardar Cambios</button>
-        <label class="btn btn-kml" for="kmlInput">📁 Cargar KML / GeoJSON</label>
+
+        <button id="saveBtn" class="btn-pucobre" disabled>💾 Guardar Cambios</button>
+        
+        <label class="btn-pucobre" for="kmlInput">📁 Cargar KML / GeoJSON</label>
         <input id="kmlInput" type="file" style="display:none" accept=".kml,.geojson,.json" />
-        <div class="status-container"><span id="status">🔌 Conectando...</span></div>
+
+        <div class="status-container">
+            <span id="status">Cargando parámetros...</span>
+        </div>
+
         <div id="userInfo">👤 Identificando...</div>
     </div>
 
@@ -54,6 +64,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
+
     <script type="module" src="js/index.js"></script>
 </body>
 </html>
