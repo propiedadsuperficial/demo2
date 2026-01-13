@@ -7,11 +7,11 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-    
     <link rel="stylesheet" href="css/index.css" />
     
     <style>
-        /* Ajustes rápidos para la nueva barra de herramientas */
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        
         #toolbar {
             display: flex;
             align-items: center;
@@ -19,31 +19,67 @@
             padding: 10px 20px;
             background: #2c3e50;
             color: white;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            height: 60px;
+            box-sizing: border-box;
+            z-index: 1100;
+        }
+
+        /* Contenedor Principal para TOC + MAPA */
+        #main-container {
+            display: flex;
+            height: calc(100vh - 60px);
+            width: 100%;
+        }
+
+        /* Panel Lateral (TOC) */
+        #sidebar {
+            width: 300px;
+            background: #f4f7f6;
+            border-right: 1px solid #bdc3c7;
+            display: flex;
+            flex-direction: column;
             z-index: 1000;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
         }
-        .btn-kml {
-            background-color: #27ae60 !important;
-            cursor: pointer;
-        }
-        .status-container {
-            flex-grow: 1;
-            text-align: right;
+
+        .sidebar-header {
+            padding: 15px;
+            background: #34495e;
+            color: white;
             font-size: 0.9em;
-        }
-        #userInfo {
-            border-left: 1px solid #7f8c8d;
-            padding-left: 15px;
             font-weight: bold;
-            color: #ecf0f1;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
+
+        #toc-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        /* Ajuste para el Mapa */
+        #map {
+            flex-grow: 1;
+            height: 100%;
+        }
+
+        /* Estilos para el Control de Capas dentro del TOC */
+        .leaflet-control-layers-list { margin: 0; padding: 5px; }
+        .leaflet-control-layers-group-name { font-weight: bold; color: #27ae60; }
+        
+        /* Botones y Otros */
+        .btn-kml { background-color: #27ae60 !important; cursor: pointer; }
+        .status-container { flex-grow: 1; text-align: right; font-size: 0.85em; opacity: 0.9; }
+        #userInfo { border-left: 1px solid #7f8c8d; padding-left: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
+
     <div id="toolbar">
         <div style="display: flex; align-items: center; gap: 8px;">
-            <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo" style="height: 30px; filter: brightness(0) invert(1);">
-            <strong style="font-size: 1.2em;">GIS</strong>
+            <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo" style="height: 25px; filter: brightness(0) invert(1);">
+            <strong style="font-size: 1.1em;">GIS</strong>
         </div>
 
         <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar Cambios</button>
@@ -52,17 +88,28 @@
         <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz,.geojson,.json" />
 
         <div class="status-container">
-            <span id="status" class="status">🔌 Iniciando conexión...</span>
+            <span id="status" class="status">🔌 Conectando...</span>
         </div>
         <div id="userInfo">👤 Identificando...</div>
     </div>
 
-    <div id="map" style="height: calc(100vh - 60px); width: 100%;"></div>
+    <div id="main-container">
+        
+        <div id="sidebar">
+            <div class="sidebar-header">Capas y Autores</div>
+            <div id="toc-content">
+                </div>
+        </div>
+
+        <div id="map"></div>
+
+    </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
     
     <script type="module" src="js/index.js"></script>
+
 </body>
 </html>
