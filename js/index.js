@@ -79,69 +79,65 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
   statusEl.textContent = `📂 Procesando ${file.name}...`;
 
   const reader = new FileReader();
-  reader.onload = function(event) {
+// Dentro del reader.onload de tu index.js actual
+reader.onload = function(event) {
     try {
-      // omnivore está disponible globalmente desde el script tag
-      const kmlLayer = omnivore.kml.parse(event.target.result);
-      
-      kmlLayer.on('ready', function() {
-        let count = 0;
-        this.eachLayer(layer => {
-          // Preservar estilos originales del KML
-          if (layer.feature && layer.feature.properties) {
-            const props = layer.feature.properties;
-            
-            // Aplicar estilos si existen en el KML
-            if (layer.setStyle && props.stroke) {
-              layer.setStyle({
-                color: props.stroke || '#f1c40f',
-                weight: props['stroke-width'] || 3,
-                opacity: props['stroke-opacity'] || 1,
-                fillColor: props.fill || '#f1c40f',
-                fillOpacity: props['fill-opacity'] || 0.3
-              });
-            }
-          } else {
-            // Estilo por defecto para elementos sin propiedades
-            if (layer.setStyle) {
-              layer.setStyle({ 
-                color: '#f39c12', 
-                weight: 4, 
-                fillOpacity: 0.3 
-              });
-            }
-          }
-          
-          // Metadatos del archivo
-          layer.options.customMetadata = { 
-            comentario: `KML: ${file.name}`,
-            archivo: file.name
-          };
-          
-          localDrafts.addLayer(layer);
-          count++;
-        });
-        
-        if (count > 0) {
-          map.fitBounds(localDrafts.getBounds());
-          statusEl.textContent = `✅ ${count} elementos cargados de ${file.name}`;
-        } else {
-          statusEl.textContent = `⚠️ No se encontraron geometrías en ${file.name}`;
-        }
-        
-        actualizarBoton();
-      });
+        // Usamos un contenedor temporal para validar los datos
+        const kmlRaw = event.target.result;
+        const kmlLayer = omnivore.kml.parse(kmlRaw);
 
-      kmlLayer.on('error', function(e) {
-        statusEl.textContent = `❌ Error al procesar ${file.name}`;
-        console.error("Error KML:", e);
-      });
+        // Timeout de seguridad: Si en 5 segundos no carga, avisar al usuario
+        const timeout = setTimeout(() => {
+            if (statusEl.textContent.includes("Procesando")) {
+                statusEl.textContent = "⚠️ El KML es muy complejo o grande, intentando renderizar...";
+            }
+        }, 5000);
+
+        kmlLayer.on('ready', function() {
+            clearTimeout(timeout);
+            let count = 0;
+            
+            this.eachLayer(layer => {
+                // FORZAMOS ESTILO: Vital para MultiGeometry
+                if (layer.setStyle) {
+                    layer.setStyle({
+                        color: '#f39c12',
+                        weight: 3,
+                        fillOpacity: 0.4
+                    });
+                }
+                
+                // Limpiamos descripciones pesadas para evitar lentitud en el mapa
+                if (layer.feature && layer.feature.properties) {
+                    layer.options.customMetadata = { 
+                        comentario: `KML: ${file.name} - ${layer.feature.properties.name || 'Sin nombre'}` 
+                    };
+                }
+
+                localDrafts.addLayer(layer);
+                count++;
+            });
+
+            if (count > 0) {
+                map.fitBounds(localDrafts.getBounds());
+                statusEl.textContent = `✅ ${count} elementos cargados de ${file.name}`;
+            } else {
+                statusEl.textContent = "❌ No se encontraron geometrías compatibles.";
+            }
+            actualizarBoton();
+        });
+
+        kmlLayer.on('error', function(e) {
+            clearTimeout(timeout);
+            console.error("Error detallado de Omnivore:", e);
+            statusEl.textContent = "❌ Error técnico al leer el contenido del KML.";
+        });
 
     } catch (err) {
-      statusEl.textContent = `❌ Archivo KML inválido`;
-      console.error("Error al leer KML:", err);
+        statusEl.textContent = "❌ Error crítico al procesar el archivo.";
+        console.error(err);
     }
-  };
+};
 
   reader.onerror = function() {
     statusEl.textContent = `❌ No se pudo leer el archivo`;
