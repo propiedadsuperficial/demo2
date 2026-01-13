@@ -229,9 +229,12 @@ document.getElementById('saveBtn').onclick = async () => {
 };
 
 function actualizarBoton() {
-    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
+    // Contamos solo lo que está en el grupo de borradores locales
+    const n = localDrafts.getLayers().length;
     const btn = document.getElementById('saveBtn');
+    
     btn.disabled = n === 0;
+    // Si hay 0, mostramos texto estándar; si hay más, mostramos la cuenta
     btn.innerHTML = n > 0 ? `💾 Guardar ${n} nuevos` : `💾 Guardar Cambios`;
 }
 
