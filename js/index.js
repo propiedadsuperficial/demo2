@@ -121,16 +121,25 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
         return;
       }
 
-      // ✅ FIX 4: Parsear con DOMParser para mejor manejo de errores
+      // ✅ FIX 4 mejorado: Parsear con tolerancia a errores de esquema (xsi)
       const parser = new DOMParser();
-      const kmlDOM = parser.parseFromString(kmlRaw, 'text/xml');
+      let kmlDOM = parser.parseFromString(kmlRaw, 'text/xml');
       
       // Verificar errores de parseo XML
-      const parseError = kmlDOM.querySelector('parsererror');
+      let parseError = kmlDOM.querySelector('parsererror');
+      
+      // Si falla por el error de 'xsi' no definido, intentamos una limpieza rápida
+      if (parseError && parseError.textContent.includes('xsi')) {
+          console.warn("⚠️ Error de namespace detectado. Aplicando parche de compatibilidad...");
+          const fixedRaw = kmlRaw.replace('<Document', '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"');
+          kmlDOM = parser.parseFromString(fixedRaw, 'text/xml');
+          parseError = kmlDOM.querySelector('parsererror');
+      }
+      
       if (parseError) {
-        statusEl.textContent = "❌ KML corrupto o malformado";
-        console.error('Error de parseo XML:', parseError.textContent);
-        return;
+          statusEl.textContent = "❌ KML corrupto o malformado";
+          console.error('Error de parseo XML:', parseError.textContent);
+          return;
       }
 
       // ✅ FIX 5: Usar omnivore correctamente con DOMParser
