@@ -1,240 +1,40 @@
-// js/index.js - VERSIÓN CON DEBUG DE PARÁMETROS URL
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
-
-// ============================================================================
-// 0. CONFIGURACIÓN Y PARÁMETROS URL (CON DEBUG)
-// ============================================================================
-console.log('🌐 URL COMPLETA:', window.location.href);
-console.log('🔍 SEARCH STRING:', window.location.search);
-console.log('🔍 HASH:', window.location.hash);
-
-const urlParams = new URLSearchParams(window.location.search);
-const proyectoID = urlParams.get('area') || 'general';
-const latInicial = parseFloat(urlParams.get('lat')) || -27.366;
-const lngInicial = parseFloat(urlParams.get('lng')) || -70.332;
-const zoomInicial = parseInt(urlParams.get('zoom')) || 14;
-
-console.log('✅ PARÁMETROS PROCESADOS:', {
-    proyectoID,
-    latInicial,
-    lngInicial,
-    zoomInicial,
-    esDefault: proyectoID === 'general'
-});
-
-const firebaseConfig = {
-    apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
-    authDomain: "gis-pucobre.firebaseapp.com",
-    projectId: "gis-pucobre",
-    storageBucket: "gis-pucobre.firebasestorage.app",
-    messagingSenderId: "654550355942",
-    appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-// Manejo de Identidad
-let userEmail = localStorage.getItem('pucobre_user');
-if (!userEmail || !userEmail.includes('@')) {
-    userEmail = prompt("Ingrese correo corporativo:");
-    if (userEmail && userEmail.includes('@')) {
-        localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
-    } else {
-        alert("Acceso denegado."); 
-        throw new Error("Sin auth");
-    }
-}
-
-// ============================================================================
-// 1. INICIALIZACIÓN DE MAPA
-// ============================================================================
-console.log('🗺️ Inicializando mapa en:', { lat: latInicial, lng: lngInicial, zoom: zoomInicial });
-
-const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri — Pucobre', maxZoom: 19
-}).addTo(map);
-
-const localDrafts = L.featureGroup().addTo(map);
-const docMap = new Map();
-const gruposPorAutor = {};
-let selectedLayer = null;
-
-let layerControl = L.control.layers(null, null, { collapsed: false, position: 'topright' }).addTo(map);
-
-// ============================================================================
-// 2. FUNCIÓN DE SELECCIÓN (CYAN)
-// ============================================================================
-function seleccionarGeometria(e) {
-    const layer = e.target;
-    if (selectedLayer) {
-        const esMio = selectedLayer.options.customMetadata?.autor === userEmail;
-        selectedLayer.setStyle({ color: esMio ? '#27ae60' : '#3498db', weight: 2 });
-    }
-    selectedLayer = layer;
-    layer.setStyle({ color: '#00ffff', weight: 4, fillOpacity: 0.4 });
-    L.DomEvent.stopPropagation(e);
-}
-
-// ============================================================================
-// 3. HERRAMIENTAS DE DIBUJO Y EDICIÓN
-// ============================================================================
-const drawControl = new L.Control.Draw({
-    edit: { featureGroup: localDrafts, remove: true },
-    draw: { circle: false, circlemarker: false }
-});
-map.addControl(drawControl);
-
-map.on(L.Draw.Event.CREATED, (e) => {
-    const layer = e.layer;
-    const descripcion = prompt("Descripción:");
-    if (descripcion) {
-        layer.options.customMetadata = { comentario: descripcion, autor: userEmail };
-        layer.on('click', seleccionarGeometria);
-        localDrafts.addLayer(layer);
-        actualizarBoton();
-    }
-});
-
-map.on(L.Draw.Event.EDITED, () => actualizarBoton());
-
-map.on(L.Draw.Event.DELETED, async (e) => {
-    e.layers.eachLayer(async (layer) => {
-        const dbId = docMap.get(layer._leaflet_id);
-        const autor = layer.options.customMetadata?.autor;
-        if (dbId && autor === userEmail) {
-            await deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId));
-        } else if (dbId) {
-            alert("No puedes borrar capas de otros autores.");
-            location.reload();
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIS Pucobre - Pantalla Completa</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #toolbar {
+            display: flex; align-items: center; gap: 15px; padding: 0 20px;
+            background: #2c3e50; color: white; height: 60px; z-index: 1100;
+            position: relative; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
-    });
-    actualizarBoton();
-});
-
-// ============================================================================
-// 4. SINCRONIZACIÓN NUBE
-// ============================================================================
-console.log('📡 Conectando a colección:', `geometrias_${proyectoID}`);
-
-onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
-    console.log('📥 Snapshot recibido:', snap.size, 'documentos');
-    
-    for (let a in gruposPorAutor) {
-        map.removeLayer(gruposPorAutor[a]);
-        layerControl.removeLayer(gruposPorAutor[a]);
-        delete gruposPorAutor[a];
-    }
-    
-    snap.forEach(d => {
-        const data = d.data();
-        const autor = data.autor;
-        if (!gruposPorAutor[autor]) {
-            gruposPorAutor[autor] = L.featureGroup().addTo(map);
-            const label = (autor === userEmail) ? `<b>⭐ MIS CAPAS (${snap.size})</b>` : `👤 ${autor}`;
-            layerControl.addOverlay(gruposPorAutor[autor], label);
-        }
-        const geoJSON = JSON.parse(data.feature);
-        const lg = L.geoJSON(geoJSON, {
-            style: { color: autor === userEmail ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
-        });
-        lg.eachLayer(l => {
-            docMap.set(l._leaflet_id, d.id);
-            l.options.customMetadata = { autor: autor, dbId: d.id };
-            l.on('click', seleccionarGeometria);
-            l.bindPopup(`<b>${data.comentario}</b><br>Autor: ${autor}`);
-            l.addTo(gruposPorAutor[autor]);
-            if (autor === userEmail) l.addTo(localDrafts);
-        });
-    });
-    
-    document.getElementById('status').textContent = `📡 ÁREA: ${proyectoID.toUpperCase()} | Total: ${snap.size}`;
-});
-
-// ============================================================================
-// 5. GUARDAR / ACTUALIZAR
-// ============================================================================
-document.getElementById('saveBtn').onclick = async () => {
-    const layers = localDrafts.getLayers();
-    document.getElementById('saveBtn').disabled = true;
-    
-    for (const layer of layers) {
-        const dbId = docMap.get(layer._leaflet_id);
-        const payload = {
-            feature: JSON.stringify(layer.toGeoJSON()),
-            autor: userEmail,
-            comentario: layer.options.customMetadata?.comentario || "Sin nombre",
-            fecha: new Date().toLocaleString('es-CL'),
-            timestamp: serverTimestamp()
-        };
-        if (dbId) {
-            await updateDoc(doc(db, `geometrias_${proyectoID}`, dbId), payload);
-        } else {
-            await addDoc(collection(db, `geometrias_${proyectoID}`), payload);
-        }
-    }
-    actualizarBoton();
-};
-
-function actualizarBoton() {
-    const n = localDrafts.getLayers().length;
-    document.getElementById('saveBtn').disabled = n === 0;
-    document.getElementById('saveBtn').innerHTML = `💾 Guardar Cambios (${n})`;
-}
-
-// ============================================================================
-// 6. CARGA KML / GEOJSON
-// ============================================================================
-document.getElementById('kmlInput').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (event) => {
-        let content = event.target.result;
-        
-        if (file.name.toLowerCase().endsWith('.kml')) {
-            // Reparar namespace xsi si es necesario
-            if (content.includes('xsi')) {
-                content = content.replace(/<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
-            }
-            const layer = omnivore.kml.parse(content);
-            layer.on('ready', () => procesarCapas(layer, file.name));
-        } else {
-            // GeoJSON
-            const layer = L.geoJSON(JSON.parse(content));
-            procesarCapas(layer, file.name);
-        }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-});
-
-function procesarCapas(layerGroup, fileName) {
-    layerGroup.eachLayer(l => {
-        const props = l.feature?.properties || {};
-        const name = props.name || props.Name || fileName;
-        l.options.customMetadata = { comentario: name, autor: userEmail };
-        l.on('click', seleccionarGeometria);
-        localDrafts.addLayer(l);
-    });
-    map.fitBounds(localDrafts.getBounds());
-    actualizarBoton();
-}
-
-// ============================================================================
-// 7. AUTENTICACIÓN
-// ============================================================================
-signInAnonymously(auth);
-onAuthStateChanged(auth, (u) => { 
-    if(u) {
-        document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`;
-        console.log('✅ Usuario autenticado:', userEmail);
-    }
-});
-
-console.log('✅ Sistema inicializado correctamente');
+        #map { height: calc(100vh - 60px); width: 100vw; position: absolute; top: 60px; left: 0; }
+        .btn-pucobre { background-color: #27ae60 !important; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .status-container { flex-grow: 1; text-align: right; font-size: 0.85em; color: #bdc3c7; }
+        #userInfo { border-left: 1px solid #7f8c8d; padding-left: 15px; font-weight: bold; color: #ecf0f1; }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo" style="height: 25px; filter: brightness(0) invert(1);">
+            <strong>GIS</strong>
+        </div>
+        <button id="saveBtn" class="btn-pucobre" disabled>💾 Guardar Cambios</button>
+        <label class="btn-pucobre" for="kmlInput">📁 Cargar KML</label>
+        <input id="kmlInput" type="file" style="display:none" accept=".kml,.geojson" />
+        <div class="status-container"><span id="status">Conectando...</span></div>
+        <div id="userInfo">👤 Identificando...</div>
+    </div>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
+    <script type="module" src="js/index.js"></script>
+</body>
+</html>
