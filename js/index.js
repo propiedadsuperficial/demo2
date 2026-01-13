@@ -121,17 +121,24 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
         return;
       }
 
-      // ✅ FIX 4 mejorado: Parsear con tolerancia a errores de esquema (xsi)
+      // ✅ NUEVO FIX 4: Parsear con tolerancia a errores de ArcMap (xsi)
       const parser = new DOMParser();
       let kmlDOM = parser.parseFromString(kmlRaw, 'text/xml');
       
-      // Verificar errores de parseo XML
+      // Verificar si hay errores de parseo XML
       let parseError = kmlDOM.querySelector('parsererror');
       
-      // Si falla por el error de 'xsi' no definido, intentamos una limpieza rápida
+      // Si el error es por el namespace 'xsi' faltante 
       if (parseError && parseError.textContent.includes('xsi')) {
-          console.warn("⚠️ Error de namespace detectado. Aplicando parche de compatibilidad...");
-          const fixedRaw = kmlRaw.replace('<Document', '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"');
+          console.warn("⚠️ Detectado KML de ArcMap con prefijo 'xsi' no definido. Reparando...");
+          
+          // Inyectamos la declaración del namespace xsi en la etiqueta <Document> 
+          const fixedRaw = kmlRaw.replace(
+              '<Document', 
+              '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+          );
+          
+          // Reintentamos el parseo con el archivo corregido
           kmlDOM = parser.parseFromString(fixedRaw, 'text/xml');
           parseError = kmlDOM.querySelector('parsererror');
       }
