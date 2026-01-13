@@ -145,23 +145,45 @@ async function unificarYProcesar(layerGroup, fileName) {
             const layer = allLayers[i];
             const props = layer.feature?.properties || {};
             
-            // 1. Extraer nombre/comentario
+// ... dentro de la función unificarYProcesar ...
+
+            // 1. Extraer nombre/comentario principal
             const name = props.name || props.Name || props.ID || `Elemento ${i+1}`;
             
-            // 2. Limpiar descripción si es HTML pesado (común en ArcMap)
-            if (props.description && props.description.length > 500) {
-                props.description = `<b>${name}</b><br><small>Datos optimizados de ArcMap</small>`;
+            // 2. GENERAR TABLA DE INFORMACIÓN TABULAR (Balloon)
+            let tablaHTML = `<div style="min-width:250px;">
+                                <h3 style="margin:0 0 10px 0; color:#2c3e50; border-bottom:2px solid #27ae60;">${name}</h3>
+                                <table style="width:100%; border-collapse: collapse; font-size:12px;">`;
+            
+            for (const key in props) {
+                // Saltamos propiedades que no queremos mostrar (metadatos internos)
+                const skipKeys = ['name', 'Name', 'description', 'styleUrl', 'styleHash', 'id'];
+                if (skipKeys.includes(key) || !props[key]) continue;
+            
+                // Formatear el nombre de la columna (ej: "NOM_LAYER" -> "Nom Layer")
+                const label = key.replace(/_/g, ' ').toUpperCase();
+                const value = props[key];
+            
+                // Si el valor es un link (como los de SharePoint de Pucobre)
+                const displayValue = (typeof value === 'string' && value.startsWith('http')) 
+                    ? `<a href="${value}" target="_blank" style="color:#2980b9; font-weight:bold;">Ver Documento 🔗</a>`
+                    : value;
+            
+                tablaHTML += `<tr style="border-bottom: 1px solid #eee;">
+                                <td style="padding:4px; font-weight:bold; color:#7f8c8d;">${label}</td>
+                                <td style="padding:4px; color:#2c3e50;">${displayValue}</td>
+                              </tr>`;
             }
-
-            // 3. Estilo Visual
-            if (layer instanceof L.Path) {
-                layer.setStyle({
-                    color: props.stroke || '#f39c12',
-                    fillColor: props.fill || '#f39c12',
-                    fillOpacity: 0.3,
-                    weight: 2
-                });
-            }
+            
+            tablaHTML += `</table></div>`;
+            
+            // 3. Vincular el popup y asignar metadata
+            layer.bindPopup(tablaHTML);
+            
+            layer.options.customMetadata = {
+                comentario: `Predio: ${name}`,
+                archivo: fileName
+            };
 
             // 4. Metadata para Firebase
             layer.options.customMetadata = {
