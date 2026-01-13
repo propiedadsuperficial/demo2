@@ -3,68 +3,75 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GIS Pucobre - Sistema de Gestión</title>
+    <title>GIS Pucobre - Proyectos Colaborativos</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        body, html { 
+            margin: 0; padding: 0; height: 100%; width: 100%; 
+            overflow: hidden; font-family: 'Segoe UI', sans-serif;
+        }
         
-        /* BARRA SUPERIOR */
         #toolbar {
             display: flex; align-items: center; gap: 15px; padding: 0 20px;
-            background: #2c3e50; color: white; height: 60px; z-index: 1100;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            background: #2c3e50; color: white; height: 60px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3); z-index: 1100;
             position: relative;
         }
 
-        /* MAPA A PANTALLA COMPLETA (OCUPA TODO BAJO EL TOOLBAR) */
-        #map { 
-            height: calc(100vh - 60px); 
-            width: 100vw; 
+        /* Mapa a pantalla completa */
+        #map {
+            height: calc(100vh - 60px);
+            width: 100vw;
             position: absolute;
             top: 60px;
             left: 0;
         }
 
-        /* BOTONES INSTITUCIONALES */
         .btn-pucobre { 
-            background-color: #27ae60; color: white; border: none; 
-            padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+            background-color: #27ae60 !important; color: white;
+            padding: 8px 15px; border-radius: 4px; cursor: pointer;
+            font-size: 14px; border: none; font-weight: bold;
         }
-        #saveBtn { background-color: #34495e; }
         #saveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
-        
-        .status-container { flex-grow: 1; text-align: right; font-size: 0.85em; color: #bdc3c7; }
-        #userInfo { border-left: 1px solid #7f8c8d; padding-left: 15px; font-weight: bold; color: #ecf0f1; }
+
+        .status-container { 
+            flex-grow: 1; text-align: right; font-size: 0.85em; color: #bdc3c7;
+        }
+        #userInfo { 
+            border-left: 1px solid #7f8c8d; padding-left: 15px; 
+            font-weight: bold; color: #ecf0f1;
+        }
     </style>
 </head>
 <body>
+
     <div id="toolbar">
         <div style="display: flex; align-items: center; gap: 8px;">
-            <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo" style="height: 25px; filter: brightness(0) invert(1);">
+            <img src="https://www.pucobre.cl/wp-content/uploads/2021/10/logo-pucobre.png" alt="Logo Pucobre" style="height: 25px; filter: brightness(0) invert(1);">
             <strong>GIS</strong>
         </div>
 
         <button id="saveBtn" class="btn-pucobre" disabled>💾 Guardar Cambios</button>
         
         <label class="btn-pucobre" for="kmlInput">📁 Cargar KML / GeoJSON</label>
-        <input id="kmlInput" type="file" style="display:none" accept=".kml,.geojson,.json" />
+        <input id="kmlInput" type="file" style="display:none" accept=".kml,.kmz,.geojson,.json" />
 
         <div class="status-container">
-            <span id="status">Cargando parámetros...</span>
+            <span id="status">🔌 Iniciando conexión...</span>
         </div>
-
         <div id="userInfo">👤 Identificando...</div>
     </div>
 
     <div id="map"></div>
-
+    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
-
+    
     <script type="module" src="js/index.js"></script>
+
 </body>
 </html>
