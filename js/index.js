@@ -159,7 +159,7 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
       // EVENTO: KML CARGADO EXITOSAMENTE
       // ============================================================================
       kmlLayer.on('ready', function() {
-        clearTimeout(loadTimeout);
+        clearTimeout(loadTimeout); // ✅ Cancelar timeout INMEDIATAMENTE
         
         if (currentKmlLoad?.cancelled) {
           statusEl.textContent = "⚠️ Carga cancelada por el usuario";
@@ -171,6 +171,21 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
         
         // Recolectar todas las capas
         this.eachLayer(layer => {
+          // ✅ OPTIMIZACIÓN: Limpiar descripciones HTML pesadas
+          if (layer.feature?.properties?.description) {
+            const desc = layer.feature.properties.description;
+            // Si la descripción es muy larga (típico de KML exportados de ArcGIS/QGIS)
+            if (desc.length > 1000) {
+              const name = layer.feature.properties.name || 
+                          layer.feature.properties.Name || 
+                          `Elemento ${totalFeatures + 1}`;
+              
+              // Simplificar para mejorar rendimiento
+              layer.feature.properties.description = `<b>${name}</b><br><small>Descripción simplificada del KML</small>`;
+              console.log(`📝 Descripción simplificada: ${name} (${desc.length} → ${layer.feature.properties.description.length} chars)`);
+            }
+          }
+          
           totalFeatures++;
           allLayers.push(layer);
         });
@@ -180,7 +195,7 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
           return;
         }
 
-        console.log(`📊 KML parseado: ${totalFeatures} features encontrados`);
+        console.log(`📊 KML parseado exitosamente: ${totalFeatures} features (sin timeout)`);
         statusEl.textContent = `⏳ Procesando ${totalFeatures} elementos...`;
 
         // ✅ FIX 6: Procesar en chunks para evitar bloqueo del UI
@@ -270,12 +285,12 @@ document.getElementById('kmlInput').addEventListener('change', function(e) {
         }
       });
 
-      // ✅ FIX 9: Timeout mejorado con mensaje progresivo
+      // ✅ FIX 9: Timeout ajustado para KML con descripciones HTML pesadas
       loadTimeout = setTimeout(() => {
         if (currentKmlLoad && !currentKmlLoad.cancelled) {
-          statusEl.textContent = "⏱️ El archivo es grande, sigue procesando... (puede tomar 1-2 min)";
+          statusEl.textContent = "⏱️ Procesando descripciones HTML complejas... (esto es normal)";
         }
-      }, 8000);
+      }, 12000); // 12 segundos para dar tiempo a KML con HTML embebido
 
     } catch (err) {
       statusEl.textContent = "❌ Error crítico al procesar el archivo";
