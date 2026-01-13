@@ -7,125 +7,38 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-    <link rel="stylesheet" href="css/index.css" />
     
     <style>
         body, html { 
-            margin: 0; 
-            padding: 0; 
-            height: 100%; 
-            width: 100%; 
-            overflow: hidden; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0; padding: 0; height: 100%; width: 100%; 
+            overflow: hidden; font-family: 'Segoe UI', sans-serif;
         }
         
-        /* Barra de herramientas superior */
         #toolbar {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 0 20px;
-            background: #2c3e50;
-            color: white;
-            height: 60px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            z-index: 1100;
+            display: flex; align-items: center; gap: 15px; padding: 0 20px;
+            background: #2c3e50; color: white; height: 60px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3); z-index: 1100;
             position: relative;
         }
 
-        /* Contenedor Principal (Flexbox para TOC a la izquierda) */
-        #main-wrapper {
-            display: flex;
-            height: calc(100vh - 60px);
-            width: 100%;
-        }
-
-        /* Panel Lateral (TOC) */
-        #sidebar-gis {
-            width: 320px;
-            background: #fdfdfd;
-            border-right: 1px solid #ced4da;
-            display: flex;
-            flex-direction: column;
-            z-index: 1000;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
-        }
-
-        .toc-title {
-            background: #34495e;
-            color: white;
-            padding: 15px;
-            font-weight: bold;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        #toc-container {
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 10px;
-        }
-
-        /* Contenedor del Mapa */
-        #map-view {
-            flex-grow: 1;
-            height: 100%;
-            position: relative;
-        }
-
+        /* EL MAPA AHORA OCUPA TODO EL ANCHO */
         #map {
-            height: 100%;
-            width: 100%;
+            height: calc(100vh - 60px); 
+            width: 100vw;
+            position: absolute;
+            top: 60px;
+            left: 0;
         }
 
-        /* Personalización del Control de Capas de Leaflet en el Sidebar */
-        .leaflet-control-layers {
-            box-shadow: none !important;
-            border: none !important;
-            background: transparent !important;
-            width: 100%;
-        }
-        .leaflet-control-layers-list {
-            font-size: 13px;
-        }
-        .leaflet-control-layers-group-name {
-            font-weight: bold;
-            color: #27ae60;
-            display: block;
-            margin-top: 10px;
-            border-bottom: 1px solid #eee;
-        }
-
-        /* Estilos de Botones y Status */
         .btn-kml { 
-            background-color: #27ae60 !important; 
-            color: white;
-            padding: 8px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            display: inline-block;
+            background-color: #27ae60 !important; color: white;
+            padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 14px;
         }
         .btn-save {
-            padding: 8px 15px;
-            border-radius: 4px;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
+            padding: 8px 15px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;
         }
-        .status-container { 
-            flex-grow: 1; 
-            text-align: right; 
-            font-size: 0.85em; 
-            color: #bdc3c7;
-        }
-        #userInfo { 
-            border-left: 1px solid #7f8c8d; 
-            padding-left: 15px; 
-            font-weight: bold; 
-            color: #ecf0f1;
-        }
+        .status-container { flex-grow: 1; text-align: right; font-size: 0.85em; color: #bdc3c7; }
+        #userInfo { border-left: 1px solid #7f8c8d; padding-left: 15px; font-weight: bold; color: #ecf0f1; }
     </style>
 </head>
 <body>
@@ -147,24 +60,11 @@
         <div id="userInfo">👤 Identificando...</div>
     </div>
 
-    <div id="main-wrapper">
-        
-        <aside id="sidebar-gis">
-            <div class="toc-title">Tabla de Contenidos</div>
-            <div id="toc-container">
-                </div>
-        </aside>
-
-        <main id="map-view">
-            <div id="map"></div>
-        </main>
-
-    </div>
+    <div id="map"></div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js"></script>
-    
     <script type="module" src="js/index.js"></script>
 
 </body>
