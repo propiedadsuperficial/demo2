@@ -2,12 +2,17 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/fireba
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
-// 0. CONFIGURACIÓN Y PARÁMETROS URL
+// ============================================================================
+// 0. CONFIGURACIÓN DINÁMICA DE PARÁMETROS (TU SOLUCIÓN)
+// ============================================================================
+console.log('🌐 URL:', window.location.href);
+console.log('🔍 Search:', window.location.search);
 const urlParams = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') || 'general';
 const latInicial = parseFloat(urlParams.get('lat')) || -27.366;
 const lngInicial = parseFloat(urlParams.get('lng')) || -70.332;
 const zoomInicial = parseInt(urlParams.get('zoom')) || 14;
+console.log('✅ Parámetros:', { proyectoID, latInicial, lngInicial, zoomInicial });
 
 const firebaseConfig = {
     apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
@@ -22,27 +27,28 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-let userEmail = localStorage.getItem('pucobre_user') || prompt("Ingrese correo corporativo:");
+let userEmail = localStorage.getItem('pucobre_user') || prompt("Correo corporativo:");
 if (userEmail && userEmail.includes('@')) {
     localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
 } else {
     alert("Acceso denegado."); throw new Error("Sin auth");
 }
 
-// 1. INICIALIZACIÓN DE MAPA
+// 1. INICIALIZACIÓN DEL MAPA
 const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri — Pucobre', maxZoom: 19
+    attribution: '© Esri — Pucobre'
 }).addTo(map);
 
 const localDrafts = L.featureGroup().addTo(map);
 const docMap = new Map();
 const gruposPorAutor = {};
-let selectedLayer = null; // Puntero Cyan
+let selectedLayer = null;
 
+// TOC FLOTANTE A LA DERECHA (Sin depender de aside)
 let layerControl = L.control.layers(null, null, { collapsed: false, position: 'topright' }).addTo(map);
 
-// 2. FUNCIÓN DE SELECCIÓN (CYAN)
+// 2. SELECCIÓN CYAN
 function seleccionarGeometria(e) {
     const layer = e.target;
     if (selectedLayer) {
@@ -54,7 +60,7 @@ function seleccionarGeometria(e) {
     L.DomEvent.stopPropagation(e);
 }
 
-// 3. HERRAMIENTAS DE DIBUJO Y EDICIÓN
+// 3. DIBUJO Y EDICIÓN
 const drawControl = new L.Control.Draw({
     edit: { featureGroup: localDrafts, remove: true },
     draw: { circle: false, circlemarker: false }
@@ -63,7 +69,7 @@ map.addControl(drawControl);
 
 map.on(L.Draw.Event.CREATED, (e) => {
     const layer = e.layer;
-    layer.options.customMetadata = { comentario: prompt("Descripción:"), autor: userEmail };
+    layer.options.customMetadata = { comentario: prompt("Nombre:"), autor: userEmail };
     layer.on('click', seleccionarGeometria);
     localDrafts.addLayer(layer);
     actualizarBoton();
@@ -78,14 +84,14 @@ map.on(L.Draw.Event.DELETED, async (e) => {
         if (dbId && autor === userEmail) {
             await deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId));
         } else if (dbId) {
-            alert("No puedes borrar capas de otros autores.");
+            alert("No tienes permiso.");
             location.reload();
         }
     });
     actualizarBoton();
 });
 
-// 4. SINCRONIZACIÓN NUBE
+// 4. SINCRONIZACIÓN CON FIREBASE (Usando proyectoID de la URL)
 onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
     for (let a in gruposPorAutor) {
         map.removeLayer(gruposPorAutor[a]);
@@ -97,7 +103,7 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
         const autor = data.autor;
         if (!gruposPorAutor[autor]) {
             gruposPorAutor[autor] = L.featureGroup().addTo(map);
-            const label = (autor === userEmail) ? `<b>⭐ MIS CAPAS (${snap.size})</b>` : `👤 ${autor}`;
+            const label = (autor === userEmail) ? `⭐ MIS CAPAS (${snap.size})` : `👤 ${autor}`;
             layerControl.addOverlay(gruposPorAutor[autor], label);
         }
         const geoJSON = JSON.parse(data.feature);
@@ -113,7 +119,7 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
             if (autor === userEmail) l.addTo(localDrafts);
         });
     });
-    document.getElementById('status').textContent = `📡 ÁREA: ${proyectoID.toUpperCase()} | Total: ${snap.size}`;
+    document.getElementById('status').textContent = `📍 ÁREA: ${proyectoID.toUpperCase()} | ☁️ Nube: ${snap.size}`;
 });
 
 // 5. GUARDAR / ACTUALIZAR
@@ -140,27 +146,6 @@ function actualizarBoton() {
     document.getElementById('saveBtn').disabled = n === 0;
     document.getElementById('saveBtn').innerHTML = `💾 Guardar Cambios (${n})`;
 }
-
-// Carga KML con reparación xsi
-document.getElementById('kmlInput').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = (event) => {
-        let content = event.target.result;
-        if (content.includes('xsi')) content = content.replace(/<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
-        const layer = omnivore.kml.parse(content);
-        layer.on('ready', () => {
-            layer.eachLayer(l => {
-                l.options.customMetadata = { autor: userEmail, comentario: file.name };
-                l.on('click', seleccionarGeometria);
-                localDrafts.addLayer(l);
-            });
-            map.fitBounds(localDrafts.getBounds());
-            actualizarBoton();
-        });
-    };
-    reader.readAsText(file);
-});
 
 signInAnonymously(auth);
 onAuthStateChanged(auth, (u) => { if(u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`; });
