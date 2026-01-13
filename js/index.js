@@ -1,6 +1,6 @@
-// js/index.js - GIS PUCOBRE - VERSIÓN OPTIMIZADA
+// js/index.js - VERSIÓN "GIS PROFESIONAL" (TOC + TABULAR + BORRADO POR AUTOR)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
 // ============================================================================
@@ -25,320 +25,216 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// Autenticación de usuario
-let userEmail = localStorage.getItem('pucobre_user') || prompt("Correo corporativo:");
-if (userEmail && userEmail.includes('@')) {
-    localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
-} else {
-    alert("Acceso denegado."); 
-    throw new Error("Sin auth");
+// Manejo de Identidad
+let userEmail = localStorage.getItem('pucobre_user');
+if (!userEmail || !userEmail.includes('@')) {
+    userEmail = prompt("Ingrese correo corporativo:");
+    if (userEmail && userEmail.includes('@')) {
+        localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
+    } else {
+        alert("Acceso denegado."); throw new Error("Sin auth");
+    }
 }
 
 // ============================================================================
-// 1. INICIALIZACIÓN DEL MAPA
+// 1. INICIALIZACIÓN DE MAPA Y TOC
 // ============================================================================
 const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri — Pucobre',
-    maxZoom: 19
+    attribution: '© Esri — Pucobre', maxZoom: 19
 }).addTo(map);
 
-const localDrafts = L.featureGroup().addTo(map);
-const docMap = new Map();
-const gruposPorAutor = {};
-let selectedLayer = null;
+// Grupos de capas
+const localDrafts = L.featureGroup().addTo(map); // Capas en edición (propias)
+const docMap = new Map(); // Vincula ID Leaflet -> ID Firebase
+const gruposPorAutor = {}; // TOC Dinámico
 
-const layerControl = L.control.layers(null, null, { 
-    collapsed: false, 
-    position: 'topright' 
-}).addTo(map);
+// Control de Capas (TOC) - Estilo GIS Profesional
+let layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
 
 // ============================================================================
-// 2. FUNCIÓN DE SELECCIÓN (RESALTADO CYAN)
-// ============================================================================
-function seleccionarGeometria(e) {
-    const layer = e.target;
-    
-    // Desmarcar capa anterior
-    if (selectedLayer) {
-        const esMio = selectedLayer.options.customMetadata?.autor === userEmail;
-        selectedLayer.setStyle({ 
-            color: esMio ? '#27ae60' : '#3498db', 
-            weight: 2,
-            fillOpacity: 0.15 
-        });
-    }
-    
-    // Marcar nueva capa
-    selectedLayer = layer;
-    layer.setStyle({ 
-        color: '#00ffff', 
-        weight: 4, 
-        fillOpacity: 0.4 
-    });
-    
-    L.DomEvent.stopPropagation(e);
-}
-
-// ============================================================================
-// 3. HERRAMIENTAS DE DIBUJO Y EDICIÓN
+// 2. HERRAMIENTAS DE DIBUJO Y BORRADO
 // ============================================================================
 const drawControl = new L.Control.Draw({
-    edit: { 
-        featureGroup: localDrafts, 
-        remove: true 
-    },
-    draw: { 
-        circle: false, 
-        circlemarker: false 
-    }
+    edit: { featureGroup: localDrafts, remove: true },
+    draw: { circle: false, circlemarker: false }
 });
 map.addControl(drawControl);
 
-// Crear nueva geometría
+// Crear nuevo dibujo
 map.on(L.Draw.Event.CREATED, (e) => {
     const layer = e.layer;
-    const nombre = prompt("Nombre/Descripción:");
-    
-    if (nombre) {
-        layer.options.customMetadata = { 
-            comentario: nombre, 
-            autor: userEmail 
-        };
-        layer.on('click', seleccionarGeometria);
-        localDrafts.addLayer(layer);
-        actualizarBoton();
-    }
-});
-
-// Editar geometría existente
-map.on(L.Draw.Event.EDITED, () => {
+    layer.options.customMetadata = { comentario: prompt("Nombre/Descripción:") || "Dibujo manual" };
+    localDrafts.addLayer(layer);
     actualizarBoton();
 });
 
-// Borrar geometría con validación
+// Borrado con validación de Autor
 map.on(L.Draw.Event.DELETED, async (e) => {
-    e.layers.eachLayer(async (layer) => {
+    const layers = e.layers;
+    let borrados = 0;
+
+    layers.eachLayer(async (layer) => {
         const dbId = docMap.get(layer._leaflet_id);
         const autor = layer.options.customMetadata?.autor;
-        
-        if (dbId && autor === userEmail) {
-            try {
-                await deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId));
-            } catch (err) {
-                console.error('Error al borrar:', err);
-                alert('Error al eliminar de Firebase');
-            }
-        } else if (dbId) {
-            alert("⛔ No puedes borrar capas de otros autores.");
-            location.reload();
-        }
-    });
-    actualizarBoton();
-});
 
-// ============================================================================
-// 4. SINCRONIZACIÓN CON FIREBASE
-// ============================================================================
-onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
-    // Limpiar capas existentes
-    for (let autor in gruposPorAutor) {
-        map.removeLayer(gruposPorAutor[autor]);
-        layerControl.removeLayer(gruposPorAutor[autor]);
-        delete gruposPorAutor[autor];
-    }
-    
-    // Reconstruir capas desde Firebase
-    snap.forEach(d => {
-        const data = d.data();
-        const autor = data.autor;
-        
-        // Crear grupo por autor si no existe
-        if (!gruposPorAutor[autor]) {
-            gruposPorAutor[autor] = L.featureGroup().addTo(map);
-            const label = (autor === userEmail) 
-                ? `⭐ MIS CAPAS (${snap.size})` 
-                : `👤 ${autor}`;
-            layerControl.addOverlay(gruposPorAutor[autor], label);
-        }
-        
-        // Parsear y agregar geometría
-        const geoJSON = JSON.parse(data.feature);
-        const lg = L.geoJSON(geoJSON, {
-            style: { 
-                color: autor === userEmail ? '#27ae60' : '#3498db', 
-                weight: 2, 
-                fillOpacity: 0.15 
-            }
-        });
-        
-        lg.eachLayer(l => {
-            docMap.set(l._leaflet_id, d.id);
-            l.options.customMetadata = { autor: autor, dbId: d.id };
-            l.on('click', seleccionarGeometria);
-            l.bindPopup(`
-                <div style="min-width:200px">
-                    <h4 style="margin:0 0 8px 0;color:#27ae60">${data.comentario}</h4>
-                    <hr style="margin:8px 0;border:none;border-top:1px solid #ddd">
-                    <div style="font-size:12px;color:#666">
-                        <strong>👤 Autor:</strong> ${autor}<br>
-                        <strong>📅 Fecha:</strong> ${data.fecha || 'N/A'}
-                    </div>
-                </div>
-            `);
-            l.addTo(gruposPorAutor[autor]);
-            
-            // Agregar a localDrafts solo si es del usuario actual
+        if (dbId) {
             if (autor === userEmail) {
-                l.addTo(localDrafts);
+                try {
+                    await deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId));
+                    borrados++;
+                } catch (err) { console.error("Error Firebase:", err); }
+            } else {
+                alert(`No tienes permiso. Autor: ${autor}`);
+                location.reload(); // Revertir visualmente
             }
-        });
+        }
     });
-    
-    // Actualizar status
-    document.getElementById('status').textContent = 
-        `📍 ÁREA: ${proyectoID.toUpperCase()} | ☁️ Total: ${snap.size} capas`;
+    if(borrados > 0) document.getElementById('status').textContent = `🗑️ ${borrados} eliminados`;
 });
 
 // ============================================================================
-// 5. GUARDAR/ACTUALIZAR EN FIREBASE
-// ============================================================================
-document.getElementById('saveBtn').onclick = async () => {
-    const layers = localDrafts.getLayers();
-    if (layers.length === 0) return;
-    
-    const btn = document.getElementById('saveBtn');
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Guardando...';
-    
-    try {
-        for (const layer of layers) {
-            const dbId = docMap.get(layer._leaflet_id);
-            const payload = {
-                feature: JSON.stringify(layer.toGeoJSON()),
-                autor: userEmail,
-                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
-                fecha: new Date().toLocaleString('es-CL'),
-                timestamp: serverTimestamp()
-            };
-            
-            if (dbId) {
-                // Actualizar existente
-                await updateDoc(doc(db, `geometrias_${proyectoID}`, dbId), payload);
-            } else {
-                // Crear nuevo
-                await addDoc(collection(db, `geometrias_${proyectoID}`), payload);
-            }
-        }
-        
-        document.getElementById('status').textContent = '✅ Guardado exitoso';
-        setTimeout(() => actualizarBoton(), 1500);
-        
-    } catch (error) {
-        console.error('Error al guardar:', error);
-        alert('❌ Error al guardar en Firebase');
-        btn.disabled = false;
-        actualizarBoton();
-    }
-};
-
-function actualizarBoton() {
-    const n = localDrafts.getLayers().length;
-    const btn = document.getElementById('saveBtn');
-    btn.disabled = n === 0;
-    btn.innerHTML = n > 0 ? `💾 Guardar Cambios (${n})` : `💾 Guardar Cambios`;
-}
-
-// ============================================================================
-// 6. CARGA DE KML / GEOJSON
+// 3. PROCESAMIENTO KML / GEOJSON
 // ============================================================================
 document.getElementById('kmlInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
-    
-    document.getElementById('status').textContent = `📂 Cargando ${file.name}...`;
+    const fileName = file.name.toLowerCase();
     const reader = new FileReader();
-    
-    reader.onload = (event) => {
+    document.getElementById('status').textContent = `📂 Leyendo ${file.name}...`;
+
+    reader.onload = async (event) => {
         try {
             const content = event.target.result;
-            const fileName = file.name.toLowerCase();
-            
+            let layerToProcess;
+
             if (fileName.endsWith('.kml')) {
-                // Procesar KML con reparación de namespace
-                let kmlContent = content;
-                if (kmlContent.includes('xsi:')) {
-                    kmlContent = kmlContent.replace(
-                        /<Document(\s+)/i, 
-                        '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1'
-                    );
+                const parser = new DOMParser();
+                let kmlDOM = parser.parseFromString(content, 'text/xml');
+                if (kmlDOM.querySelector('parsererror')?.textContent.includes('xsi')) {
+                    const fixed = content.replace(/<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
+                    kmlDOM = parser.parseFromString(fixed, 'text/xml');
                 }
-                
-                const layer = omnivore.kml.parse(kmlContent);
-                layer.on('ready', () => {
-                    procesarCapasImportadas(layer, file.name);
-                });
-                
-            } else if (fileName.endsWith('.geojson') || fileName.endsWith('.json')) {
-                // Procesar GeoJSON
-                const geoData = JSON.parse(content);
-                const layer = L.geoJSON(geoData);
-                procesarCapasImportadas(layer, file.name);
+                layerToProcess = omnivore.kml.parse(kmlDOM);
+                layerToProcess.on('ready', () => unificarYProcesar(layerToProcess, file.name));
+            } else {
+                layerToProcess = L.geoJSON(JSON.parse(content));
+                unificarYProcesar(layerToProcess, file.name);
             }
-            
-        } catch (error) {
-            console.error('Error al cargar archivo:', error);
-            alert('❌ Error al procesar el archivo. Verifica el formato.');
-            document.getElementById('status').textContent = '❌ Error en carga';
-        }
+        } catch (err) { console.error(err); }
     };
-    
     reader.readAsText(file);
-    e.target.value = ''; // Limpiar input
+    e.target.value = '';
 });
 
-function procesarCapasImportadas(layerGroup, fileName) {
-    let contador = 0;
+async function unificarYProcesar(layerGroup, fileName) {
+    const all = [];
+    layerGroup.eachLayer(l => all.push(l));
     
-    layerGroup.eachLayer(l => {
-        const props = l.feature?.properties || {};
-        const nombre = props.name || props.Name || props.description || `Capa ${++contador}`;
+    for (let i = 0; i < all.length; i++) {
+        const layer = all[i];
+        const props = layer.feature?.properties || {};
+        const name = props.name || props.Name || `Elemento ${i+1}`;
         
-        l.options.customMetadata = { 
-            comentario: nombre, 
-            autor: userEmail,
-            archivo: fileName
-        };
+        layer.options.customMetadata = { comentario: name, archivo: fileName, autor: userEmail };
+        layer.bindPopup(generarTablaPopup(name, userEmail, "Recién cargado", props));
         
-        l.on('click', seleccionarGeometria);
-        
-        // Aplicar estilo
-        if (l instanceof L.Path) {
-            l.setStyle({ 
-                color: '#27ae60', 
-                weight: 2, 
-                fillOpacity: 0.2 
-            });
-        }
-        
-        localDrafts.addLayer(l);
-    });
-    
-    // Ajustar vista al contenido
-    if (localDrafts.getLayers().length > 0) {
-        map.fitBounds(localDrafts.getBounds());
+        if (layer instanceof L.Path) layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2 });
+        localDrafts.addLayer(layer);
     }
-    
-    document.getElementById('status').textContent = `✅ ${contador} capas importadas`;
+    map.fitBounds(localDrafts.getBounds());
     actualizarBoton();
 }
 
 // ============================================================================
-// 7. AUTENTICACIÓN FIREBASE
+// 4. SINCRONIZACIÓN Y TOC PROFESIONAL
 // ============================================================================
-signInAnonymously(auth);
-onAuthStateChanged(auth, (user) => { 
-    if (user) {
-        document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`;
+onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
+    // Limpiar TOC y capas de nube
+    for (let a in gruposPorAutor) {
+        map.removeLayer(gruposPorAutor[a]);
+        layerControl.removeLayer(gruposPorAutor[a]);
+        delete gruposPorAutor[a];
     }
+
+    const dataByAutor = {};
+    snap.forEach(d => {
+        const data = d.data();
+        if (!dataByAutor[data.autor]) dataByAutor[data.autor] = [];
+        dataByAutor[data.autor].push({ id: d.id, ...data });
+    });
+
+    for (const autor in dataByAutor) {
+        const grupo = L.featureGroup();
+        const esMio = (autor === userEmail);
+        const label = esMio ? `<b>⭐ MIS CAPAS (${dataByAutor[autor].length})</b>` : `👤 ${autor} (${dataByAutor[autor].length})`;
+
+        dataByAutor[autor].forEach(item => {
+            const geoJSON = JSON.parse(item.feature);
+            const layer = L.geoJSON(geoJSON, {
+                style: { color: esMio ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
+            });
+
+            layer.eachLayer(l => {
+                docMap.set(l._leaflet_id, item.id);
+                l.options.customMetadata = { autor: autor };
+                l.bindPopup(generarTablaPopup(item.comentario, autor, item.fecha, geoJSON.properties));
+                l.addTo(grupo);
+            });
+        });
+
+        gruposPorAutor[autor] = grupo;
+        grupo.addTo(map);
+        layerControl.addOverlay(grupo, label);
+    }
+    document.getElementById('status').textContent = `📡 ÁREA: ${proyectoID.toUpperCase()} | Total: ${snap.size}`;
 });
+
+// ============================================================================
+// 5. UTILIDADES (TABLA Y BOTONES)
+// ============================================================================
+function generarTablaPopup(titulo, autor, fecha, props) {
+    let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${titulo}</h4>`;
+    html += `<small style="color:gray">👤 ${autor} | 📅 ${fecha}</small><hr><table style="width:100%;font-size:11px">`;
+    for (let k in props) {
+        if (['name','Name','description','styleUrl','styleHash'].includes(k) || !props[k]) continue;
+        const val = props[k];
+        const disp = (typeof val === 'string' && val.startsWith('http')) ? `<a href="${val}" target="_blank">Link 🔗</a>` : val;
+        html += `<tr style="border-bottom:1px solid #eee"><td><b>${k.toUpperCase()}</b></td><td>${disp}</td></tr>`;
+    }
+    return html + `</table></div>`;
+}
+
+document.getElementById('saveBtn').onclick = async () => {
+    const layers = localDrafts.getLayers();
+    if (layers.length === 0) return;
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+
+    for (const layer of layers) {
+        if (docMap.has(layer._leaflet_id)) continue; // Evitar duplicar si ya existe en nube
+        try {
+            await addDoc(collection(db, `geometrias_${proyectoID}`), {
+                feature: JSON.stringify(layer.toGeoJSON()),
+                autor: userEmail,
+                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
+                archivo: layer.options.customMetadata?.archivo || "Web",
+                fecha: new Date().toLocaleString('es-CL'),
+                timestamp: serverTimestamp()
+            });
+            localDrafts.removeLayer(layer);
+        } catch (e) { console.error(e); }
+    }
+    actualizarBoton();
+};
+
+function actualizarBoton() {
+    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = n === 0;
+    btn.innerHTML = n > 0 ? `💾 Guardar ${n} nuevos` : `💾 Guardar Cambios`;
+}
+
+// Inicio Auth
+signInAnonymously(auth);
+onAuthStateChanged(auth, (u) => { if(u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`; });
