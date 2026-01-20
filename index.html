@@ -1,87 +1,149 @@
-
-<!doctype html>
+```html
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <title>GIS Pucobre — Demo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIS Pucobre</title>
+  
+  <link rel="preconnect" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://firestore.googleapis.com">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" crossorigin="anonymous">
 
-  <!-- Preconnect para acelerar CDNs/Firebase -->
-  <link rel="preconnect" href="https://wwwconnect" href="https://firestore.googleapis href="https://unpkg.comf="https://cdnjs.cloudflareink
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-   t.draw/1.0.4/leaflet.draw.css"
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer"
-    --header-h: 56px;
-      --brand: #27ae60;   /* verde Pucobre para UI */
-      --brand-2: #3498db; /* azul para capas ajenas */
-      --bg-1: #1f2937;    /* header */
-      --fg-1: #e5e7eb;    /* texto header */
+  <style>
+    :root {
+      --header-h: 56px;
+      --brand: #27ae60;
+      --bg-header: #1f2937;
+      --text-header: #e5e7eb;
     }
-    html, body { height: 100%; margin: 0; }
-    body { display: flex; flex-direction: column; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-
+    
+    * { box-sizing: border-box; }
+    
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    
     header {
       height: var(--header-h);
-      display: flex; align-items: center; gap: 12px;
-      padding: 0 12px;
-      background: var(--bg-1); color: var(--fg-1);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      background: var(--bg-header);
+      color: var(--text-header);
       border-bottom: 1px solid #111827;
     }
-    .brand { font-weight: 700; letter-spacing: .3px; display:flex; align-items:center; gap:8px; }
-    .brand .dot { width:10px; height:10px; border-radius:50%; background:var(--brand); display:inline-block; }
-
-    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .toolbar .btn {
-      appearance: none; border: none; cursor: pointer; padding: 8px 12px; border-radius: 6px;
-      font-weight: 600; color: #0b2415; background: #86efac; /* verde claro */
+    
+    .brand {
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    .toolbar .btn[disabled] { opacity: .5; cursor: not-allowed; }
-    .toolbar .btn.secondary { background: #10b981; color: #062015; }
-
-    .spacer { flex: 1; }
-    .status { font-size: 13px; opacity: .9; margin-right: 8px; white-space: nowrap; }
-    .user { font-size: 13px; font-weight: 600; white-space: nowrap; }
-
-    #map { flex: 1 1 auto; min-height: calc(100% - var(--header-h)); }
-    .leaflet-control-container .leaflet-top.leaflet-left { margin-top: 70px; } /* despegar controles del header */
+    
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--brand);
+    }
+    
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      background: #10b981;
+      color: white;
+      transition: opacity 0.2s;
+    }
+    
+    .btn:hover:not(:disabled) {
+      opacity: 0.85;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .btn-secondary {
+      background: #3b82f6;
+    }
+    
+    .spacer {
+      flex: 1;
+    }
+    
+    .status {
+      font-size: 13px;
+      opacity: 0.9;
+    }
+    
+    .user {
+      font-size: 13px;
+      font-weight: 600;
+      padding-left: 12px;
+      border-left: 1px solid #374151;
+    }
+    
+    #map {
+      flex: 1;
+      background: #f3f4f6;
+    }
+    
+    .leaflet-control-container .leaflet-top.leaflet-left {
+      margin-top: 66px;
+    }
   </style>
 </head>
+
 <body>
-
   <header>
-    <div class="brand" title="GIS Pucobre">
-      <span class="dot"></span> <span>Logo GIS</span>
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>GIS Pucobre</span>
     </div>
-
+    
     <div class="toolbar">
-      <button id="saveBtn" class="btn">💾 Guardar Cambios</button>
-
-      <!-- Botón "Cargar KML" como label que dispara el input file -->
-      <label for="kmlInput" class="btn secondary">🟩 Cargar KML</label>
-      <input id="kmlInput" type="file" accept=".kml,.geojson,.json" hidden />
+      <button id="saveBtn" class="btn" disabled>💾 Guardar Cambios</button>
+      <label for="kmlInput" class="btn btn-secondary">📁 Cargar KML</label>
+      <input id="kmlInput" type="file" accept=".kml,.geojson,.json" style="display:none">
     </div>
-
+    
     <div class="spacer"></div>
-
-    <div class="status" id="status">📡</div>
+    <div class="status" id="status">🔌 Iniciando...</div>
     <div class="user" id="userInfo">👤</div>
   </header>
+  
+  <div id="map"></div>
 
-  <div id="map" role="region" aria-label="Mapa GIS"></div>
-
-  <!-- JS: Leaflet + Leaflet.Draw + Omnivore (global) -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-   crossorigin="anonymous"
-    referrerpolicy="no-referrer"
- nivore.min.js"
-   pp (ESM) -->
-  js/index.js</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" crossorigin="anonymous"></script>
+  <script type="module" src="js/index.js"></script>
 </body>
 </html>
-``
+```
