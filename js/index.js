@@ -1,8 +1,6 @@
 
-// js/index.js — Versión estable con guardado idempotente por FID
-// Mantiene: parámetros URL, Leaflet/Draw/Omnivore, TOC por autor y prompts de email.
-// Cambios clave: setDoc(fid, {merge:true}), isSaving, contador estable.
-// (Basado en tus archivos previos)  ⟶  ref: turn3search1 / turn3search2
+// js/index.js — Versión estable con pendientes por FID + guardado idempotente
+// Mantiene: parámetros URL, Leaflet/Draw/Omnivore, TOC por autor y prompt de email.
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
@@ -11,7 +9,7 @@ import {
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
 // ============================================================================
-// 0) CONFIG + PARÁMETROS URL (se conservan)
+// 0) CONFIG + PARÁMETROS URL (se conservan tal cual)
 // ============================================================================
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
@@ -63,14 +61,41 @@ const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: '© Esri — Pucobre', maxZoom: 19
 }).addTo(map);
-window.map = map; // para depuración rápida
+window.map = map; // depuración
 
-const localDrafts = L.featureGroup().addTo(map); // capas en edición (pendientes)
-const docMap = new Map();                        // FID -> idFirestore (para compat)
-const gruposPorAutor = {};                       // TOC dinámico
+// Grupo visual de borradores (capas en edición)
+const localDrafts = L.featureGroup().addTo(map);
+
+// Mapa de referencias (FID -> idFirestore). En el nuevo flujo id==fid, pero lo mantenemos por compat.
+const docMap = new Map();
+
+// TOC por autor
+const gruposPorAutor = {};
 const layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
 
-let isSaving = false;                            // <— NUEVO
+// Estado
+let isSaving = false;
+
+// ============================================================================
+// 1.1) Pendientes por FID (contador robusto)
+// ============================================================================
+const pending = new Map(); // fid -> { layer, meta }
+
+function actualizarBoton() {
+  const n = pending.size;
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = n === 0;
+  btn.textContent = n ? `💾 Guardar Cambios (${n})` : `💾 Guardar Cambios`;
+}
+
+function markDirty(layer, extraMeta = {}) {
+  const gj = layer.toGeoJSON();
+  const fid = ensureFID(gj);
+  layer.options.customMetadata = { ...(layer.options.customMetadata || {}), ...extraMeta };
+  pending.set(fid, { layer, meta: layer.options.customMetadata });
+  actualizarBoton();
+  return fid;
+}
 
 // ============================================================================
 // 2) Dibujo y borrado (sobre borradores locales)
@@ -81,30 +106,39 @@ const drawControl = new L.Control.Draw({
 });
 map.addControl(drawControl);
 
-// Crear nuevo dibujo (inyecta FID y mantiene metadata)
+// Crear nuevo dibujo (inyecta FID, aplica estilo y lo marca como pendiente)
 map.on(L.Draw.Event.CREATED, (e) => {
   const original = e.layer;
   const gj = original.toGeoJSON();
   ensureFID(gj);
   const layer = L.geoJSON(gj).getLayers()[0];
 
-  layer.options.customMetadata = {
-    comentario: prompt("Nombre/Descripción:") ?? "Dibujo manual",
-    autor: userEmail
-  };
+  const comentario = prompt("Nombre/Descripción:") ?? "Dibujo manual";
+  layer.options.customMetadata = { comentario, autor: userEmail, archivo: "Web" };
+
   if (layer instanceof L.Path) layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2 });
 
+  // Visual: mostrar en borradores
   localDrafts.addLayer(layer);
-  actualizarBoton();
+
+  // Lógico: 1 pendiente por FID (deduplicado)
+  markDirty(layer);
 });
 
-// Borrado (solo localDrafts). Si existe en nube y es del autor, lo elimina.
+// Borrado de borradores locales (y, si corresponde, también de nube)
 map.on(L.Draw.Event.DELETED, async (e) => {
   const layers = e.layers;
   let borrados = 0;
   const tasks = [];
+
   layers.eachLayer((layer) => {
+    // 1) Quitar de pendientes si estaba sin guardar
     const fid = getFIDFromLayer(layer);
+    if (fid && pending.has(fid)) {
+      pending.delete(fid);
+    }
+
+    // 2) Si existe en nube y es mío, eliminarlo de Firebase
     const autor = layer.options.customMetadata?.autor;
     const dbId = fid ? docMap.get(fid) : undefined;
     if (dbId) {
@@ -116,16 +150,20 @@ map.on(L.Draw.Event.DELETED, async (e) => {
         );
       } else {
         alert(`No tienes permiso. Autor: ${autor}`);
-        location.reload(); // revertir visualmente si intentó borrar ajeno
+        location.reload(); // revertir visual si intentó borrar ajeno
       }
     }
   });
+
   if (tasks.length) await Promise.allSettled(tasks);
   if (borrados > 0) document.getElementById('status').textContent = `🗑️ ${borrados} eliminados`;
+
+  // Actualiza contador tras posibles deletes de pendientes
+  actualizarBoton();
 });
 
 // ============================================================================
-// 3) Carga KML / GeoJSON
+// 3) Carga KML / GeoJSON (cada feature agregada suma 1 pendiente por FID)
 // ============================================================================
 document.getElementById('kmlInput').addEventListener('change', function (e) {
   const file = e.target.files[0];
@@ -178,7 +216,10 @@ async function unificarYProcesar(layerGroup, fileName) {
     layer.bindPopup(generarTablaPopup(name, userEmail, "Recién cargado", props));
     if (layer instanceof L.Path) layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2 });
 
+    // Visual
     localDrafts.addLayer(layer);
+    // Lógico
+    markDirty(layer, { comentario: name, archivo: fileName, autor: userEmail });
   }
 
   if (localDrafts.getLayers().length) {
@@ -188,7 +229,7 @@ async function unificarYProcesar(layerGroup, fileName) {
 }
 
 // ============================================================================
-// 4) SINCRONIZACIÓN (TOC por autor) — ignora durante guardado
+// 4) SINCRONIZACIÓN (TOC por autor) — ignorar durante guardado
 // ============================================================================
 onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
   if (isSaving) return; // evita “eco” visual mientras se confirma el commit
@@ -218,12 +259,12 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
 
     dataByAutor[autor].forEach(item => {
       const geoJSON = JSON.parse(item.feature);
-      const fid = ensureFID(geoJSON);     // asegura existencia de fid (compat)
+      const fid = ensureFID(geoJSON); // asegura FID (compat si faltara)
       const layer = L.geoJSON(geoJSON, {
         style: { color: esMio ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
       });
       layer.eachLayer(l => {
-        if (fid) docMap.set(fid, item.id); // mapea FID -> docId (en nuevo flujo id==fid)
+        if (fid) docMap.set(fid, item.id); // en nuevo flujo id==fid
         l.options.customMetadata = { autor: autor };
         l.bindPopup(generarTablaPopup(item.comentario, autor, item.fecha, geoJSON.properties));
         l.addTo(grupo);
@@ -247,42 +288,47 @@ function generarTablaPopup(titulo, autor, fecha, props = {}) {
   for (const k in props) {
     if (['name','Name','description','styleUrl','styleHash','__fid'].includes(k) || !props[k]) continue;
     const val = props[k];
-    const disp = (typeof val === 'string' && val.startsWith('http')) ? `<{val}Link 🔗</a>` : val;
-    html += `<tr style="border-bottom:1px solid #eee"><td><b>${k.toUpperCase()}</b></td><td>${disp}</td></tr>`;
+    const disp = (typeof val === 'string' && val.startsWith('http')) ? `<a href="${val}" target="_blank"ml += `<tr style="border-bottom:1px solid #eee"><td><b>${k.toUpperCase()}</b></td><td>${disp}</td></tr>`;
   }
   return html + `</table></div>`;
 }
 
-// Guardar (idempotente por FID) — limpia borradores tras commit
+// Guardar (idempotente por FID) — recorre pendientes únicos y limpia estado local
 document.getElementById('saveBtn').onclick = async () => {
-  const layers = localDrafts.getLayers();
-  if (!layers.length) return;
+  if (pending.size === 0) return;
 
   const btn = document.getElementById('saveBtn');
   btn.disabled = true;
   isSaving = true;
 
   try {
-    const ops = layers.map((layer) => {
-      const gj  = layer.toGeoJSON();
-      const fid = ensureFID(gj); // ID estable del documento
+    const ops = [];
+    for (const [fid, entry] of pending.entries()) {
+      const layer = entry.layer;
+      const meta  = entry.meta || {};
+      const gj    = layer.toGeoJSON();
+      ensureFID(gj); // por si acaso
+
       const ref = doc(db, `geometrias_${proyectoID}`, fid);
       const payload = {
         feature: JSON.stringify(gj),
         autor: userEmail,
-        comentario: layer.options.customMetadata?.comentario ?? "Sin nombre",
-        archivo: layer.options.customMetadata?.archivo ?? "Web",
+        comentario: meta.comentario ?? "Sin nombre",
+        archivo: meta.archivo ?? "Web",
         fecha: new Date().toLocaleString('es-CL'),
         timestamp: serverTimestamp()
       };
-      return setDoc(ref, payload, { merge: true }); // ⟵ idempotente
-    });
+      ops.push(setDoc(ref, payload, { merge: true })); // idempotente
+    }
 
     await Promise.all(ops);
 
-    localDrafts.clearLayers();  // limpiamos borradores locales
+    // Limpieza visual y de estado local
+    localDrafts.clearLayers();
+    pending.clear();
     actualizarBoton();
-    document.getElementById('status').textContent = `✅ Cambios guardados (${layers.length})`;
+
+    document.getElementById('status').textContent = `✅ Cambios guardados (${ops.length})`;
   } catch (e) {
     console.error('Error al guardar:', e);
     alert(e?.message ?? 'Error al guardar');
@@ -292,13 +338,6 @@ document.getElementById('saveBtn').onclick = async () => {
   }
 };
 
-function actualizarBoton() {
-  const n = localDrafts.getLayers().length;
-  const btn = document.getElementById('saveBtn');
-  btn.disabled = n === 0;
-  btn.textContent = n ? `💾 Guardar Cambios (${n})` : `💾 Guardar Cambios`;
-}
-
 // ============================================================================
 // 6) AUTH anónima (como tenías), y mostrar usuario
 // ============================================================================
@@ -306,3 +345,4 @@ signInAnonymously(auth);
 onAuthStateChanged(auth, (u) => {
   if (u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`;
 });
+``
