@@ -1,10 +1,10 @@
-
 // js/index.js — Versión estable con pendientes por FID + guardado idempotente
 // Mantiene: parámetros URL, Leaflet/Draw/Omnivore, TOC por autor y prompt de email.
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
-  getFirestore, collection, setDoc, onSnapshot, deleteDoc, doc, serverTimestamp
+  getFirestore, collection, setDoc, onSnapshot, deleteDoc, doc, serverTimestamp,
+  enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence
 } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
@@ -28,6 +28,14 @@ const firebaseConfig = {
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
+
+// Habilitar persistencia offline multi-tab
+enableMultiTabIndexedDbPersistence(db).catch((err) => {
+  // Fallback a single-tab si multi-tab falla
+  enableIndexedDbPersistence(db).catch((err2) => {
+    console.warn('Sin persistencia offline:', err?.code || err, ' / ', err2?.code || err2);
+  });
+});
 
 // Identidad simple (como en tu código)
 let userEmail = localStorage.getItem('pucobre_user');
@@ -54,6 +62,26 @@ function getFIDFromLayer(layer) {
   return layer?.feature?.properties?.__fid;
 }
 
+// Anti-hijack: fuerza nuevo FID si ya existe en nube
+function forceNewFIDIfHijack(gj) {
+  const fid = gj?.properties?.__fid;
+  if (fid && docMap.has(fid)) {
+    gj.properties.__fid = newFID();
+  }
+}
+
+// ============================================================================
+// 0.2) Sanitización HTML para prevenir XSS
+// ============================================================================
+function escapeHTML(s = '') {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 // ============================================================================
 // 1) MAPA y TOC
 // ============================================================================
@@ -66,8 +94,9 @@ window.map = map; // depuración
 // Grupo visual de borradores (capas en edición)
 const localDrafts = L.featureGroup().addTo(map);
 
-// Mapa de referencias (FID -> idFirestore). En el nuevo flujo id==fid, pero lo mantenemos por compat.
+// Mapa de referencias (FID -> idFirestore) y autores reales
 const docMap = new Map();
+const ownerByFid = new Map(); // fid -> autor real del servidor
 
 // TOC por autor
 const gruposPorAutor = {};
@@ -111,18 +140,29 @@ map.on(L.Draw.Event.CREATED, (e) => {
   const original = e.layer;
   const gj = original.toGeoJSON();
   ensureFID(gj);
+  forceNewFIDIfHijack(gj); // Anti-hijack
   const layer = L.geoJSON(gj).getLayers()[0];
 
   const comentario = prompt("Nombre/Descripción:") ?? "Dibujo manual";
   layer.options.customMetadata = { comentario, autor: userEmail, archivo: "Web" };
 
-  if (layer instanceof L.Path) layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2 });
+  // Estilo con línea punteada para distinguir borradores
+  if (layer instanceof L.Path) {
+    layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
+  }
 
   // Visual: mostrar en borradores
   localDrafts.addLayer(layer);
 
   // Lógico: 1 pendiente por FID (deduplicado)
   markDirty(layer);
+});
+
+// Capturar ediciones de borradores existentes
+map.on(L.Draw.Event.EDITED, (e) => {
+  e.layers.eachLayer((layer) => {
+    markDirty(layer);
+  });
 });
 
 // Borrado de borradores locales (y, si corresponde, también de nube)
@@ -138,19 +178,21 @@ map.on(L.Draw.Event.DELETED, async (e) => {
       pending.delete(fid);
     }
 
-    // 2) Si existe en nube y es mío, eliminarlo de Firebase
-    const autor = layer.options.customMetadata?.autor;
+    // 2) Si existe en nube, validar autor REAL antes de borrar
     const dbId = fid ? docMap.get(fid) : undefined;
+    const owner = fid ? ownerByFid.get(fid) : undefined;
+    
     if (dbId) {
-      if (autor === userEmail) {
+      if (owner === userEmail) {
         tasks.push(
           deleteDoc(doc(db, `geometrias_${proyectoID}`, dbId))
             .then(() => borrados++)
             .catch(err => console.error("Error Firebase:", err))
         );
       } else {
-        alert(`No tienes permiso. Autor: ${autor}`);
-        location.reload(); // revertir visual si intentó borrar ajeno
+        alert(`No tienes permiso. Autor real: ${owner ?? 'desconocido'}`);
+        // Re-agregar la capa en vez de recargar la página
+        try { localDrafts.addLayer(layer); } catch {}
       }
     }
   });
@@ -180,11 +222,29 @@ document.getElementById('kmlInput').addEventListener('change', function (e) {
       if (fileName.endsWith('.kml')) {
         const parser = new DOMParser();
         let kmlDOM = parser.parseFromString(content, 'text/xml');
-        // Fix común cuando falta xsi en algunos KML
-        if (kmlDOM.querySelector('parsererror')?.textContent?.includes('xsi')) {
-          const fixed = content.replace(/\<Document(\s+)/i, '<Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"$1');
-          kmlDOM = parser.parseFromString(fixed, 'text/xml');
+        
+        // Fix robusto para KML sin namespace xsi (#2)
+        let docEl = kmlDOM.documentElement;
+        if (!docEl) {
+          document.getElementById('status').textContent = `❌ KML inválido (sin raíz XML)`;
+          return;
         }
+
+        // Inyectar xmlns:xsi si falta
+        if (!docEl.getAttribute('xmlns:xsi')) {
+          docEl.setAttribute('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance');
+        }
+
+        // Si hubo parsererror, re-serializa y re-parsea una vez
+        if (kmlDOM.querySelector('parsererror')) {
+          kmlDOM = parser.parseFromString(new XMLSerializer().serializeToString(kmlDOM), 'text/xml');
+          docEl = kmlDOM.documentElement;
+          if (!docEl || kmlDOM.querySelector('parsererror')) {
+            document.getElementById('status').textContent = `❌ Error al parsear ${file.name}`;
+            return;
+          }
+        }
+        
         layerToProcess = omnivore.kml.parse(kmlDOM);
         layerToProcess.on('ready', () => unificarYProcesar(layerToProcess, file.name));
       } else {
@@ -193,6 +253,7 @@ document.getElementById('kmlInput').addEventListener('change', function (e) {
       }
     } catch (err) {
       console.error(err);
+      document.getElementById('status').textContent = `❌ Error al procesar ${file.name}`;
     }
   };
   reader.readAsText(file);
@@ -206,7 +267,14 @@ async function unificarYProcesar(layerGroup, fileName) {
   for (let i = 0; i < all.length; i++) {
     const base = all[i];
     const gj = base.toGeoJSON();
-    ensureFID(gj);
+    
+    // Anti-hijack en import: forzar nuevo FID si colisiona
+    if (gj.properties?.__fid && docMap.has(gj.properties.__fid)) {
+      gj.properties.__fid = newFID();
+    } else {
+      ensureFID(gj);
+    }
+    
     const layer = L.geoJSON(gj).getLayers()[0];
 
     const props = gj.properties ?? {};
@@ -214,7 +282,11 @@ async function unificarYProcesar(layerGroup, fileName) {
 
     layer.options.customMetadata = { comentario: name, archivo: fileName, autor: userEmail };
     layer.bindPopup(generarTablaPopup(name, userEmail, "Recién cargado", props));
-    if (layer instanceof L.Path) layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2 });
+    
+    // Estilo con línea punteada para distinguir borradores
+    if (layer instanceof L.Path) {
+      layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
+    }
 
     // Visual
     localDrafts.addLayer(layer);
@@ -229,11 +301,9 @@ async function unificarYProcesar(layerGroup, fileName) {
 }
 
 // ============================================================================
-// 4) SINCRONIZACIÓN (TOC por autor) — ignorar durante guardado
+// 4) SINCRONIZACIÓN (TOC por autor)
 // ============================================================================
 onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
-  if (isSaving) return; // evita “eco” visual mientras se confirma el commit
-
   // Limpiar TOC y capas de nube
   for (const a in gruposPorAutor) {
     try { map.removeLayer(gruposPorAutor[a]); } catch {}
@@ -242,6 +312,7 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
   }
 
   docMap.clear();
+  ownerByFid.clear(); // Limpiar índice de autores reales
 
   // Agrupar por autor
   const dataByAutor = {};
@@ -258,17 +329,31 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
       : `👤 ${autor} (${dataByAutor[autor].length})`;
 
     dataByAutor[autor].forEach(item => {
-      const geoJSON = JSON.parse(item.feature);
-      const fid = ensureFID(geoJSON); // asegura FID (compat si faltara)
-      const layer = L.geoJSON(geoJSON, {
-        style: { color: esMio ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
-      });
-      layer.eachLayer(l => {
-        if (fid) docMap.set(fid, item.id); // en nuevo flujo id==fid
-        l.options.customMetadata = { autor: autor };
-        l.bindPopup(generarTablaPopup(item.comentario, autor, item.fecha, geoJSON.properties));
-        l.addTo(grupo);
-      });
+      try {
+        const geoJSON = JSON.parse(item.feature);
+        const fid = ensureFID(geoJSON); // asegura FID (compat si faltara)
+        
+        // Registrar autor real del servidor
+        ownerByFid.set(fid, autor);
+        docMap.set(fid, item.id);
+        
+        // Calcular fecha desde serverTimestamp si existe
+        const fechaLabel = item.timestamp?.toDate
+          ? item.timestamp.toDate().toLocaleString('es-CL')
+          : (item.fecha ?? '-');
+        
+        const layer = L.geoJSON(geoJSON, {
+          style: { color: esMio ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
+        });
+        
+        layer.eachLayer(l => {
+          l.options.customMetadata = { autor: autor };
+          l.bindPopup(generarTablaPopup(item.comentario, autor, fechaLabel, geoJSON.properties));
+          l.addTo(grupo);
+        });
+      } catch (err) {
+        console.warn('Feature inválida en doc', item.id, err);
+      }
     });
 
     gruposPorAutor[autor] = grupo;
@@ -283,22 +368,27 @@ onSnapshot(collection(db, `geometrias_${proyectoID}`), (snap) => {
 // 5) UI helpers
 // ============================================================================
 function generarTablaPopup(titulo, autor, fecha, props = {}) {
-  let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${titulo}</h4>`;
-  html += `<small style="color:gray">👤 ${autor}  📅 ${fecha ?? '-'}</small><hr><table style="width:100%;font-size:11px">`;
+  let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${escapeHTML(titulo)}</h4>`;
+  html += `<small style="color:gray">👤 ${escapeHTML(autor)}  📅 ${escapeHTML(fecha ?? '-')}</small><hr><table style="width:100%;font-size:11px">`;
   for (const k in props) {
     if (['name','Name','description','styleUrl','styleHash','__fid'].includes(k) || !props[k]) continue;
     const val = props[k];
-    const disp = (typeof val === 'string' && val.startsWith('http')) ? `<a href="${val}" target="_blank"ml += `<tr style="border-bottom:1px solid #eee"><td><b>${k.toUpperCase()}</b></td><td>${disp}</td></tr>`;
+    const disp = (typeof val === 'string' && val.startsWith('http'))
+      ? `<a href="${escapeHTML(val)}" target="_blank" rel="noopener noreferrer">${escapeHTML(val)}</a>`
+      : `${escapeHTML(String(val))}`;
+    html += `<tr style="border-bottom:1px solid #eee"><td><b>${escapeHTML(k.toUpperCase())}</b></td><td>${disp}</td></tr>`;
   }
   return html + `</table></div>`;
 }
 
 // Guardar (idempotente por FID) — recorre pendientes únicos y limpia estado local
 document.getElementById('saveBtn').onclick = async () => {
-  if (pending.size === 0) return;
+  if (pending.size === 0 || isSaving) return;
 
   const btn = document.getElementById('saveBtn');
+  const originalText = btn.textContent;
   btn.disabled = true;
+  btn.textContent = '⏳ Guardando...';
   isSaving = true;
 
   try {
@@ -335,6 +425,7 @@ document.getElementById('saveBtn').onclick = async () => {
   } finally {
     isSaving = false;
     btn.disabled = false;
+    btn.textContent = originalText;
   }
 };
 
@@ -345,4 +436,17 @@ signInAnonymously(auth);
 onAuthStateChanged(auth, (u) => {
   if (u) document.getElementById('userInfo').innerHTML = `👤 ${userEmail}`;
 });
-``
+
+// ============================================================================
+// 7) Inicialización y protección contra pérdida de datos
+// ============================================================================
+// Inicializar estado del botón
+actualizarBoton();
+
+// Advertir si hay cambios sin guardar al cerrar/recargar
+window.addEventListener('beforeunload', (e) => {
+  if (pending.size > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
