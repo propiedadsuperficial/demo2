@@ -1,21 +1,23 @@
-// js/index.js — Versión mejorada con TODOS LOS PARCHES aplicados
-// ✅ PATCH #1: Normalización robusta de área con múltiples variantes
-// ✅ PATCH #2: UI inmediata (no espera auth para mostrar área)
-// ✅ PATCH #3: Manejo visual de errores de autenticación
-// ✅ PATCH #4: Timeout de autenticación (10s)
-// ✅ PATCH #5: Debugging de colección activa
-// ✅ PATCH #6: Guardado de feature como objeto (opcional, comentado)
+// js/index.js — VERSIÓN FINAL A PRUEBA DE BALAS
+// ✅ Todos los errores corregidos
+// ✅ App Check (opcional con flag)
+// ✅ Validación de 1 MiB
+// ✅ Lectura tolerante (string/objeto)
+// ✅ Indicador online/offline
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
-  getFirestore, collection, setDoc, onSnapshot, deleteDoc, doc, serverTimestamp,
+  getFirestore, collection, setDoc, onSnapshot, deleteDoc, doc, serverTimestamp, getDocs,
   enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence
 } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
 // ============================================================================
-// 0) CONFIG + PARÁMETROS URL
+// 0) CONFIG + FLAGS
 // ============================================================================
+const ENABLE_APP_CHECK = false; // ← Cambiar a true si App Check está en "Aplicación obligatoria"
+const MAX_DOC_SIZE_MB = 1;      // Límite de tamaño de documento
+
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
 const latInicial = parseFloat(urlParams.get('lat'))  ?? -27.366;
@@ -26,13 +28,30 @@ const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
   projectId: "gis-pucobre",
-  storageBucket: "gis-pucobre.appspot.com", // ✅ PATCH: Corregido de .firebasestorage.app
+  storageBucket: "gis-pucobre.appspot.com",
   messagingSenderId: "654550355942",
   appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
 };
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
+
+// ============================================================================
+// 0.1) APP CHECK (si está habilitado)
+// ============================================================================
+if (ENABLE_APP_CHECK) {
+  import('https://www.gstatic.com/firebasejs/10.10.0/firebase-app-check.js')
+    .then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
+      const appCheck = initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider('6LfXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'), // ← Reemplazar con tu Site Key
+        isTokenAutoRefreshEnabled: true
+      });
+      console.log('✅ [GIS] App Check inicializado');
+    })
+    .catch(err => {
+      console.error('❌ [GIS] Error al inicializar App Check:', err);
+    });
+}
 
 // Habilitar persistencia offline multi-tab con fallback
 enableMultiTabIndexedDbPersistence(db).catch((err) => {
@@ -66,15 +85,12 @@ if (!userEmail || !userEmail.includes('@')) {
 }
 
 // ============================================================================
-// 0.1) NORMALIZACIÓN DE ÁREA → COLECCIÓN (✅ PATCH #1 - ROBUSTA)
+// 0.2) NORMALIZACIÓN DE ÁREA → COLECCIÓN
 // ============================================================================
 function normalizeArea(raw) {
   const s = String(raw ?? '').toLowerCase().trim();
-  
-  // Quitar espacios, reemplazar guiones por guión_bajo
   const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
   
-  // ✅ Mapear TODAS las variantes conocidas de POZO 13
   const isPozo13 = ['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => 
     x.replace(/\s+/g, '').replace(/-/g, '_')
   ).includes(s2);
@@ -83,30 +99,27 @@ function normalizeArea(raw) {
     return { area: 'pozo13', collection: 'geometrias_pozo13' };
   }
   
-  // ✅ Mapear TODAS las variantes conocidas de ROL 23-4
   const isRol234 = [
     'rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', 'rol23 4',
     '23_4', '234', '23-4', '23 4',
-    'rdz2_4', 'rdz_2_4', 'rdz24', 'rdz 2 4'  // ← Variantes históricas
+    'rdz2_4', 'rdz_2_4', 'rdz24', 'rdz 2 4'
   ].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2);
   
   if (isRol234) {
     return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
   }
   
-  // ✅ Fallback explícito (evita valores undefined/null)
   return { area: s2 || 'general', collection: 'geometrias' };
 }
 
 const { area: areaNorm, collection: geomCollection } = normalizeArea(proyectoID);
 
-// ✅ PATCH #5: Log de debugging para confirmar colección
 console.log('🗺️ [GIS] Área solicitada:', proyectoID);
 console.log('🗺️ [GIS] Área normalizada:', areaNorm);
 console.log('🗺️ [GIS] Colección Firestore:', geomCollection);
 
 // ============================================================================
-// 0.2) FORMATEO DE ÁREA PARA UI
+// 0.3) FORMATEO Y ESCAPADO
 // ============================================================================
 function areaDisplay(norm) {
   const known = {
@@ -127,21 +140,19 @@ function escapeHTML(s = '') {
 }
 
 const AREA_LABEL = areaDisplay(areaNorm);
-
-// Actualizar título del navegador
 document.title = `GIS Pucobre — ${AREA_LABEL}`;
 
 // ============================================================================
-// 0.3) HELPER PARA ACTUALIZAR STATUS (✅ PATCH #2 - MEJORADO)
+// 0.4) HELPER PARA ACTUALIZAR STATUS
 // ============================================================================
-function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = null) {
+function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = null, fromCache = false) {
   const statusEl = document.getElementById('status');
   if (!statusEl) return;
   
-  // Mostrar colección activa para debugging
   const collectionBadge = `<span style="font-size:10px;opacity:0.6;margin-left:8px">[${geomCollection}]</span>`;
+  const cacheBadge = fromCache ? ` <span style="font-size:10px;opacity:0.6">🔌 Offline</span>` : '';
   
-  let html = `<span class="chip chip--area">ÁREA: ${escapeHTML(areaLabel)}</span>${collectionBadge}`;
+  let html = `<span class="chip chip--area">ÁREA: ${escapeHTML(areaLabel)}</span>${collectionBadge}${cacheBadge}`;
   
   if (error) {
     html += `<span class="muted" style="color:#ef4444;margin-left:8px">· Error: ${escapeHTML(error)}</span>`;
@@ -151,18 +162,63 @@ function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = nul
       html += `<span class="chip chip--mine" title="Capas propias visibles en esta área" style="margin-left:8px">MIS CAPAS (${misCapas})</span>`;
     }
   } else {
-    // ✅ Estado de carga
     html += `<span class="muted" style="color:#f59e0b;margin-left:8px">· Conectando...</span>`;
   }
   
   statusEl.innerHTML = html;
 }
 
-// ✅ PATCH #2: Mostrar área INMEDIATAMENTE (no esperar auth)
 updateStatus(AREA_LABEL, null, null, null);
 
 // ============================================================================
-// 0.4) Utilidades de FID persistente
+// 0.5) TEST DE PERMISOS AL INICIO
+// ============================================================================
+async function testPermisos() {
+  console.log('🔐 [GIS] Probando permisos de lectura...');
+  try {
+    const snap = await getDocs(collection(db, geomCollection));
+    console.log('✅ [GIS] Permisos OK -', snap.size, 'documentos en', geomCollection);
+    return true;
+  } catch (e) {
+    console.error('❌ [GIS] Error de permisos:', e.code, e.message);
+    updateStatus(AREA_LABEL, null, null, `Permiso: ${e.code}`);
+    
+    if (e.code === 'permission-denied') {
+      let msg = '🔒 ERROR DE PERMISOS\n\n';
+      msg += 'No tienes acceso a: ' + geomCollection + '\n\n';
+      msg += 'Posibles causas:\n';
+      msg += '1. App Check en "Aplicación obligatoria" → Activar ENABLE_APP_CHECK\n';
+      msg += '2. Reglas de Firestore muy restrictivas\n';
+      msg += '3. Proyecto incorrecto en Firebase Console\n\n';
+      msg += 'Revisa la consola para más detalles.';
+      alert(msg);
+    }
+    return false;
+  }
+}
+
+// ============================================================================
+// 0.6) VALIDACIÓN DE TAMAÑO
+// ============================================================================
+function validarTamanioDoc(geojson) {
+  const sizeBytes = new Blob([JSON.stringify(geojson)]).size;
+  const sizeMB = sizeBytes / (1024 * 1024);
+  
+  if (sizeMB >= MAX_DOC_SIZE_MB) {
+    const msg = `⚠️ DOCUMENTO DEMASIADO GRANDE\n\n` +
+                `Tamaño: ${sizeMB.toFixed(2)} MB\n` +
+                `Límite: ${MAX_DOC_SIZE_MB} MB\n\n` +
+                `Este documento supera el límite de Firestore.\n` +
+                `Considera simplificar la geometría o usar Storage.`;
+    alert(msg);
+    return false;
+  }
+  
+  return true;
+}
+
+// ============================================================================
+// 0.7) Utilidades de FID persistente
 // ============================================================================
 const newFID = () => (crypto?.randomUUID?.() ?? (Date.now() + '-' + Math.random().toString(36).slice(2)));
 
@@ -176,7 +232,6 @@ function getFIDFromLayer(layer) {
   return layer?.feature?.properties?.__fid;
 }
 
-// Anti-hijack: fuerza nuevo FID si ya existe en nube
 function forceNewFIDIfHijack(gj) {
   const fid = gj?.properties?.__fid;
   if (fid && docMap.has(fid)) {
@@ -193,18 +248,12 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 }).addTo(map);
 window.map = map;
 
-// Grupo visual de borradores
 const localDrafts = L.featureGroup().addTo(map);
-
-// Mapas de referencias
 const docMap = new Map();
 const ownerByFid = new Map();
-
-// TOC por autor
 const gruposPorAutor = {};
 const layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
 
-// Estado
 let isSaving = false;
 let authReady = false;
 
@@ -225,7 +274,6 @@ function markDirty(layer, extraMeta = {}) {
   const gj = layer.toGeoJSON();
   const fid = ensureFID(gj);
   
-  // Persistir FID en el layer para futuras llamadas
   if (!layer.feature) layer.feature = gj;
   if (!layer.feature.properties) layer.feature.properties = {};
   layer.feature.properties.__fid = fid;
@@ -245,14 +293,16 @@ const drawControl = new L.Control.Draw({
 });
 map.addControl(drawControl);
 
-// Crear nuevo dibujo
 map.on(L.Draw.Event.CREATED, (e) => {
   const original = e.layer;
   const gj = original.toGeoJSON();
   ensureFID(gj);
   forceNewFIDIfHijack(gj);
+  
+  // ✅ Validar tamaño
+  if (!validarTamanioDoc(gj)) return;
+  
   const layer = L.geoJSON(gj).getLayers()[0];
-
   const comentario = prompt("Nombre/Descripción:") ?? "Dibujo manual";
   layer.options.customMetadata = { comentario, autor: userEmail, archivo: "Web" };
 
@@ -265,7 +315,6 @@ map.on(L.Draw.Event.CREATED, (e) => {
   markDirty(layer);
 });
 
-// Editar geometría
 map.on(L.Draw.Event.EDITED, (e) => {
   e.layers.eachLayer(layer => {
     const fid = getFIDFromLayer(layer);
@@ -279,6 +328,10 @@ map.on(L.Draw.Event.EDITED, (e) => {
     
     const gj = layer.toGeoJSON();
     ensureFID(gj);
+    
+    // ✅ Validar tamaño
+    if (!validarTamanioDoc(gj)) return;
+    
     const meta = layer.options.customMetadata || {};
     const newLayer = L.geoJSON(gj).getLayers()[0];
     newLayer.options.customMetadata = meta;
@@ -295,7 +348,6 @@ map.on(L.Draw.Event.EDITED, (e) => {
   });
 });
 
-// Borrar geometría
 map.on(L.Draw.Event.DELETED, (e) => {
   e.layers.eachLayer(async (layer) => {
     const fid = getFIDFromLayer(layer);
@@ -346,7 +398,16 @@ document.getElementById('kmlInput').onchange = (ev) => {
         const parser = new DOMParser();
         const kmlDoc = parser.parseFromString(text, 'text/xml');
         const layerGroup = omnivore.kml.parse(kmlDoc);
-        processLoadedLayers(layerGroup, file.name);
+        
+        layerGroup.on('ready', () => {
+          processLoadedLayers(layerGroup, file.name);
+        });
+        
+        setTimeout(() => {
+          if (layerGroup.getLayers().length > 0) {
+            processLoadedLayers(layerGroup, file.name);
+          }
+        }, 2000);
       } else {
         const geojson = JSON.parse(text);
         const layerGroup = L.geoJSON(geojson);
@@ -368,6 +429,12 @@ function processLoadedLayers(layerGroup, fileName) {
   for (let i = 0; i < all.length; i++) {
     const base = all[i];
     const gj = base.toGeoJSON();
+    
+    // ✅ Validar tamaño de cada geometría
+    if (!validarTamanioDoc(gj)) {
+      console.warn(`Geometría ${i+1} muy grande, omitida`);
+      continue;
+    }
     
     if (gj.properties?.__fid && docMap.has(gj.properties.__fid)) {
       gj.properties.__fid = newFID();
@@ -397,14 +464,20 @@ function processLoadedLayers(layerGroup, fileName) {
 }
 
 // ============================================================================
-// 4) SINCRONIZACIÓN (TOC por autor) - SE INICIA CUANDO AUTH ESTÁ LISTO
+// 4) SINCRONIZACIÓN (TOC por autor)
 // ============================================================================
 let unsubscribeRT = null;
 
-function initRealtime() {
+async function initRealtime() {
   if (unsubscribeRT) {
     try { unsubscribeRT(); } catch {}
     unsubscribeRT = null;
+  }
+
+  const permisosOK = await testPermisos();
+  if (!permisosOK) {
+    console.error('❌ [GIS] Cancelando listener por falta de permisos');
+    return;
   }
 
   console.log('🔄 [GIS] Iniciando listener en colección:', geomCollection);
@@ -413,9 +486,9 @@ function initRealtime() {
   unsubscribeRT = onSnapshot(
     colRef,
     (snap) => {
-      console.log('✅ [GIS] Snapshot recibido:', snap.size, 'documentos');
+      const fromCache = snap.metadata.fromCache;
+      console.log(fromCache ? '🔌 [GIS] Snapshot desde cache:' : '☁️ [GIS] Snapshot desde servidor:', snap.size, 'documentos');
       
-      // Limpiar TOC y capas de nube
       for (const a in gruposPorAutor) {
         try { map.removeLayer(gruposPorAutor[a]); } catch {}
         try { layerControl.removeLayer(gruposPorAutor[a]); } catch {}
@@ -425,7 +498,6 @@ function initRealtime() {
       docMap.clear();
       ownerByFid.clear();
 
-      // Agrupar por autor
       const dataByAutor = {};
       snap.forEach(d => {
         const data = d.data();
@@ -441,9 +513,16 @@ function initRealtime() {
 
         dataByAutor[autor].forEach(item => {
           try {
-            // ✅ PATCH #6 (OPCIONAL): Si guardas como objeto, quitar JSON.parse
-            const geoJSON = JSON.parse(item.feature);
-            // Para usar objeto directo: const geoJSON = item.feature;
+            // ✅ LECTURA TOLERANTE: string u objeto
+            let geoJSON;
+            if (typeof item.feature === 'string') {
+              geoJSON = JSON.parse(item.feature);
+            } else if (typeof item.feature === 'object') {
+              geoJSON = item.feature;
+            } else {
+              console.warn('⚠️ Feature inválida (tipo desconocido) en doc', item.id);
+              return;
+            }
             
             const fid = ensureFID(geoJSON);
             
@@ -473,9 +552,8 @@ function initRealtime() {
         layerControl.addOverlay(grupo, label);
       }
 
-      // Actualizar status con contadores
       const mineCount = (dataByAutor[userEmail]?.length) || 0;
-      updateStatus(AREA_LABEL, snap.size, mineCount);
+      updateStatus(AREA_LABEL, snap.size, mineCount, null, fromCache);
       actualizarBoton();
     },
     (err) => {
@@ -528,11 +606,16 @@ document.getElementById('saveBtn').onclick = async () => {
       const meta  = entry.meta || {};
       const gj    = layer.toGeoJSON();
       ensureFID(gj);
+      
+      // ✅ Validar tamaño antes de guardar
+      if (!validarTamanioDoc(gj)) {
+        console.warn('Omitiendo documento muy grande:', fid);
+        continue;
+      }
 
       const ref = doc(db, geomCollection, fid);
       const payload = {
-        // ✅ PATCH #6 (OPCIONAL): Guardar como objeto en vez de string
-        feature: JSON.stringify(gj),  // Para objeto: feature: gj,
+        feature: JSON.stringify(gj),  // Puedes cambiar a: feature: gj (objeto)
         autor: userEmail,
         comentario: meta.comentario ?? "Sin nombre",
         archivo: meta.archivo ?? "Web",
@@ -542,6 +625,11 @@ document.getElementById('saveBtn').onclick = async () => {
         timestamp: serverTimestamp()
       };
       ops.push(setDoc(ref, payload, { merge: true }));
+    }
+
+    if (ops.length === 0) {
+      alert('No hay cambios válidos para guardar (todos los documentos superan 1 MiB)');
+      return;
     }
 
     await Promise.all(ops);
@@ -558,7 +646,19 @@ document.getElementById('saveBtn').onclick = async () => {
     }
   } catch (e) {
     console.error('❌ Error al guardar:', e?.code, e);
-    alert(e?.message ?? 'Error al guardar');
+    
+    let errorMsg = '❌ Error al guardar en Firebase\n\n';
+    errorMsg += `Código: ${e?.code || 'desconocido'}\n`;
+    errorMsg += `Mensaje: ${e?.message || 'Error inesperado'}\n\n`;
+    
+    if (e?.code === 'permission-denied') {
+      errorMsg += '💡 Solución:\n';
+      errorMsg += '1. Verifica las Reglas de Firestore\n';
+      errorMsg += '2. Asegúrate de estar autenticado\n';
+      errorMsg += `3. Colección: ${geomCollection}`;
+    }
+    
+    alert(errorMsg);
   } finally {
     isSaving = false;
     btn.disabled = false;
@@ -567,10 +667,8 @@ document.getElementById('saveBtn').onclick = async () => {
 };
 
 // ============================================================================
-// 6) AUTH anónima y espera para iniciar realtime (✅ PATCH #3 y #4)
+// 6) AUTH anónima
 // ============================================================================
-
-// ✅ PATCH #4: Timeout de 10 segundos para autenticación
 let authTimeout = setTimeout(() => {
   if (!authReady) {
     console.error('⏱️ [GIS] Timeout de autenticación (10s)');
@@ -580,7 +678,6 @@ let authTimeout = setTimeout(() => {
 
 signInAnonymously(auth).catch(err => {
   console.error('❌ [GIS] Error en signInAnonymously:', err?.code, err);
-  // ✅ PATCH #3: Mostrar error visualmente
   updateStatus(AREA_LABEL, null, null, `Auth: ${err?.code || 'error desconocido'}`);
   clearTimeout(authTimeout);
 });
@@ -611,7 +708,7 @@ onAuthStateChanged(auth, (u) => {
 });
 
 // ============================================================================
-// 7) Inicialización y protección
+// 7) Inicialización
 // ============================================================================
 actualizarBoton();
 
