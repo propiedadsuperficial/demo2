@@ -33,15 +33,155 @@ html, body {
     transition: background 0.3s; 
 }
 
-.btn-save { background: #27ae60; color: white; }
-.btn-save:disabled { background: #7f8c8d; cursor: not-allowed; }
-.btn-kml { background: #3498db; color: white; }
+.btn-save { 
+    background: #27ae60; 
+    color: white; 
+}
 
-.status { font-size: 13px; color: #bdc3c7; margin-left: auto; }
+.btn-save:disabled { 
+    background: #7f8c8d; 
+    cursor: not-allowed; 
+    opacity: 0.6;
+}
+
+.btn-kml { 
+    background: #3498db; 
+    color: white; 
+}
+
+.status { 
+    font-size: 13px; 
+    color: #bdc3c7; 
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .badge-user { 
     background: #34495e; 
     color: #ecf0f1; 
     padding: 4px 8px; 
     border-radius: 12px; 
     font-size: 12px; 
+}
+
+/* ============================================================================
+   CHIPS PARA STATUS (ÁREA, MIS CAPAS)
+   ============================================================================ */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    vertical-align: middle;
+    line-height: 1;
+    border: 1px solid #4b5563;
+    white-space: nowrap;
+}
+
+.chip--area {
+    color: #e5e7eb;
+    background: #374151;
+}
+
+.chip--mine {
+    color: #0b1220;
+    background: #86efac;
+    border-color: #10b981;
+}
+
+.muted {
+    font-size: 12px;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+@media (max-width: 768px) {
+    #toolbar {
+        height: auto;
+        min-height: 55px;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+    }
+    
+    .chip--mine {
+        display: none; /* ocultar contador en móvil */
+    }
+    
+    .muted {
+        font-size: 11px;
+    }
+    
+    .chip {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+    
+    .btn {
+        padding: 6px 12px;
+        font-size: 13px;
+    }
+    
+    #map {
+        height: calc(100vh - 70px); /* ajustar si toolbar crece */
+    }
+}
+
+@media (max-width: 480px) {
+    .status {
+        font-size: 11px;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    
+    .badge-user {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+}
+
+/* ============================================================================
+   LEAFLET CONTROLS (separar del header)
+   ============================================================================ */
+.leaflet-control-container .leaflet-top.leaflet-left {
+    margin-top: 65px; /* 55px header + 10px margen */
+}
+
+.leaflet-control-container .leaflet-top.leaflet-right {
+    margin-top: 65px;
+}
+
+/* ============================================================================
+   MEJORAS DE UX
+   ============================================================================ */
+.btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+/* Animación suave para chips dinámicos */
+.chip, .muted {
+    transition: opacity 0.3s ease;
+}
+
+/* Estado de loading (opcional, para futuras mejoras) */
+.status.loading::after {
+    content: '...';
+    animation: dots 1.5s steps(3, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
 }
