@@ -139,6 +139,24 @@ function escapeHTML(s = '') {
     .replaceAll("'", '&#39;');
 }
 
+// ============================================================================
+// 0.8) PARSE SEGURO DE JSON (evita crashes con datos corruptos)
+// ============================================================================
+function safeParseJSON(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  // Filtrar casos vacíos o 'undefined'/'null' textuales
+  if (!s || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return null;
+  try {
+    const obj = JSON.parse(s);
+    // Chequeo mínimo de estructura GeoJSON
+    if (obj && (obj.type || obj.features || obj.geometry)) return obj;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const AREA_LABEL = areaDisplay(areaNorm);
 document.title = `GIS Pucobre — ${AREA_LABEL}`;
 
@@ -512,15 +530,28 @@ async function initRealtime() {
           : `👤 ${autor} (${dataByAutor[autor].length})`;
 
         dataByAutor[autor].forEach(item => {
+          const docId = item.id; // ← Guardar ID para logs
+          
           try {
-            // ✅ LECTURA TOLERANTE: string u objeto
-            let geoJSON;
+            // ✅ LECTURA TOLERANTE + SEGURA (evita JSON.parse sobre undefined/vacío)
+            let geoJSON = null;
+            
             if (typeof item.feature === 'string') {
-              geoJSON = JSON.parse(item.feature);
-            } else if (typeof item.feature === 'object') {
+              geoJSON = safeParseJSON(item.feature);
+              if (!geoJSON) {
+                console.warn(`⚠️ Documento con feature inválido: ${docId}`);
+                console.warn(`   Feature raw:`, item.feature?.substring(0, 100));
+                return;
+              }
+            } else if (item && typeof item.feature === 'object') {
               geoJSON = item.feature;
             } else {
-              console.warn('⚠️ Feature inválida (tipo desconocido) en doc', item.id);
+              console.warn(`⚠️ Documento sin feature: ${docId} (tipo: ${typeof item.feature})`);
+              return;
+            }
+            
+            if (!geoJSON) {
+              console.warn(`⚠️ Feature parseó pero está vacío: ${docId}`);
               return;
             }
             
@@ -533,8 +564,17 @@ async function initRealtime() {
               ? item.timestamp.toDate().toLocaleString('es-CL')
               : (item.fecha ?? '-');
             
+            // ✅ Configuración de capa con soporte para Points
             const layer = L.geoJSON(geoJSON, {
-              style: { color: esMio ? '#27ae60' : '#3498db', weight: 2, fillOpacity: 0.15 }
+              // ✅ IMPORTANTE: pointToLayer para puntos (markers)
+              pointToLayer: (feature, latlng) => {
+                return L.marker(latlng);
+              },
+              style: { 
+                color: esMio ? '#27ae60' : '#3498db', 
+                weight: 2, 
+                fillOpacity: 0.15 
+              }
             });
             
             layer.eachLayer(l => {
@@ -543,7 +583,11 @@ async function initRealtime() {
               l.addTo(grupo);
             });
           } catch (err) {
-            console.warn('⚠️ Feature inválida en doc', item.id, err);
+            console.error(`❌ Error crítico al procesar documento ${docId}:`, err.message);
+            console.error(`   Autor: ${autor}`);
+            console.error(`   Comentario: ${item.comentario || 'sin nombre'}`);
+            console.error(`   Feature (primeros 100 chars):`, String(item.feature).substring(0, 100));
+            // Continuar con siguiente documento
           }
         });
 
