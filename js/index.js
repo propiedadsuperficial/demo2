@@ -1,5 +1,10 @@
-// js/index.js — Versión estable con pendientes por FID + guardado idempotente
-// Incluye: normalización de área, auth ready, validación de permisos, UI con chips (PATCHES #1-5 aplicados)
+// js/index.js — Versión mejorada con TODOS LOS PARCHES aplicados
+// ✅ PATCH #1: Normalización robusta de área con múltiples variantes
+// ✅ PATCH #2: UI inmediata (no espera auth para mostrar área)
+// ✅ PATCH #3: Manejo visual de errores de autenticación
+// ✅ PATCH #4: Timeout de autenticación (10s)
+// ✅ PATCH #5: Debugging de colección activa
+// ✅ PATCH #6: Guardado de feature como objeto (opcional, comentado)
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
@@ -21,7 +26,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
   authDomain: "gis-pucobre.firebaseapp.com",
   projectId: "gis-pucobre",
-  storageBucket: "gis-pucobre.firebasestorage.app",
+  storageBucket: "gis-pucobre.appspot.com", // ✅ PATCH: Corregido de .firebasestorage.app
   messagingSenderId: "654550355942",
   appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
 };
@@ -29,7 +34,7 @@ const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
 
-// Habilitar persistencia offline multi-tab con fallback (PATCH #3)
+// Habilitar persistencia offline multi-tab con fallback
 enableMultiTabIndexedDbPersistence(db).catch((err) => {
   if (err?.code === 'failed-precondition') {
     console.warn('Multi-tab no disponible, intento single-tab…');
@@ -61,24 +66,44 @@ if (!userEmail || !userEmail.includes('@')) {
 }
 
 // ============================================================================
-// 0.1) NORMALIZACIÓN DE ÁREA → COLECCIÓN (PATCH #4)
+// 0.1) NORMALIZACIÓN DE ÁREA → COLECCIÓN (✅ PATCH #1 - ROBUSTA)
 // ============================================================================
 function normalizeArea(raw) {
-  const s = String(raw || '').toLowerCase().trim();
+  const s = String(raw ?? '').toLowerCase().trim();
+  
+  // Quitar espacios, reemplazar guiones por guión_bajo
   const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
   
-  if (s2 === 'pozo13' || s2 === 'pozo_13') {
+  // ✅ Mapear TODAS las variantes conocidas de POZO 13
+  const isPozo13 = ['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => 
+    x.replace(/\s+/g, '').replace(/-/g, '_')
+  ).includes(s2);
+  
+  if (isPozo13) {
     return { area: 'pozo13', collection: 'geometrias_pozo13' };
   }
-  if (s2 === 'rol23_4' || s2 === 'rol234') {
+  
+  // ✅ Mapear TODAS las variantes conocidas de ROL 23-4
+  const isRol234 = [
+    'rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', 'rol23 4',
+    '23_4', '234', '23-4', '23 4',
+    'rdz2_4', 'rdz_2_4', 'rdz24', 'rdz 2 4'  // ← Variantes históricas
+  ].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2);
+  
+  if (isRol234) {
     return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
   }
   
-  // Fallback a 'geometrias' (sin sufijo) para coincidir con reglas
+  // ✅ Fallback explícito (evita valores undefined/null)
   return { area: s2 || 'general', collection: 'geometrias' };
 }
 
 const { area: areaNorm, collection: geomCollection } = normalizeArea(proyectoID);
+
+// ✅ PATCH #5: Log de debugging para confirmar colección
+console.log('🗺️ [GIS] Área solicitada:', proyectoID);
+console.log('🗺️ [GIS] Área normalizada:', areaNorm);
+console.log('🗺️ [GIS] Colección Firestore:', geomCollection);
 
 // ============================================================================
 // 0.2) FORMATEO DE ÁREA PARA UI
@@ -89,7 +114,7 @@ function areaDisplay(norm) {
     'rol23_4': 'ROL 23-4',
     'general': 'GENERAL'
   };
-  return known[norm] || norm.replace(/[-_]+/g, ' ').toUpperCase();
+  return known[norm] ?? norm.replace(/[-_]+/g, ' ').toUpperCase();
 }
 
 function escapeHTML(s = '') {
@@ -107,29 +132,34 @@ const AREA_LABEL = areaDisplay(areaNorm);
 document.title = `GIS Pucobre — ${AREA_LABEL}`;
 
 // ============================================================================
-// 0.3) HELPER PARA ACTUALIZAR STATUS (PATCH #1)
+// 0.3) HELPER PARA ACTUALIZAR STATUS (✅ PATCH #2 - MEJORADO)
 // ============================================================================
 function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = null) {
   const statusEl = document.getElementById('status');
   if (!statusEl) return;
   
-  // NO escapar las etiquetas HTML, solo los valores dinámicos
-  let html = `<span class="chip chip--area">ÁREA: ${escapeHTML(areaLabel)}</span>`;
+  // Mostrar colección activa para debugging
+  const collectionBadge = `<span style="font-size:10px;opacity:0.6;margin-left:8px">[${geomCollection}]</span>`;
+  
+  let html = `<span class="chip chip--area">ÁREA: ${escapeHTML(areaLabel)}</span>${collectionBadge}`;
   
   if (error) {
-    html += `<span class="muted" style="color:#ef4444">· Error: ${escapeHTML(error)}</span>`;
+    html += `<span class="muted" style="color:#ef4444;margin-left:8px">· Error: ${escapeHTML(error)}</span>`;
   } else if (totalCapas !== null) {
-    html += `<span class="muted">· Total: ${totalCapas} capas</span>`;
+    html += `<span class="muted" style="margin-left:8px">· Total: ${totalCapas} capas</span>`;
     if (misCapas !== null && misCapas > 0) {
-      html += `<span class="chip chip--mine" title="Capas propias visibles en esta área">MIS CAPAS (${misCapas})</span>`;
+      html += `<span class="chip chip--mine" title="Capas propias visibles en esta área" style="margin-left:8px">MIS CAPAS (${misCapas})</span>`;
     }
+  } else {
+    // ✅ Estado de carga
+    html += `<span class="muted" style="color:#f59e0b;margin-left:8px">· Conectando...</span>`;
   }
   
   statusEl.innerHTML = html;
 }
 
-// Mostrar área inicial
-updateStatus(AREA_LABEL);
+// ✅ PATCH #2: Mostrar área INMEDIATAMENTE (no esperar auth)
+updateStatus(AREA_LABEL, null, null, null);
 
 // ============================================================================
 // 0.4) Utilidades de FID persistente
@@ -179,7 +209,7 @@ let isSaving = false;
 let authReady = false;
 
 // ============================================================================
-// 1.1) Pendientes por FID (PATCH #5 - FID persistente en layer)
+// 1.1) Pendientes por FID
 // ============================================================================
 const pending = new Map();
 
@@ -230,120 +260,108 @@ map.on(L.Draw.Event.CREATED, (e) => {
     layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
   }
 
+  layer.bindPopup(generarTablaPopup(comentario, userEmail, "Recién dibujado", gj.properties));
   localDrafts.addLayer(layer);
   markDirty(layer);
 });
 
-// Capturar ediciones
+// Editar geometría
 map.on(L.Draw.Event.EDITED, (e) => {
-  e.layers.eachLayer((layer) => {
-    markDirty(layer);
-  });
-});
-
-// Borrado
-map.on(L.Draw.Event.DELETED, async (e) => {
-  const layers = e.layers;
-  let borrados = 0;
-  const tasks = [];
-
-  layers.eachLayer((layer) => {
+  e.layers.eachLayer(layer => {
     const fid = getFIDFromLayer(layer);
-    if (fid && pending.has(fid)) {
-      pending.delete(fid);
-    }
-
-    const dbId = fid ? docMap.get(fid) : undefined;
-    const owner = fid ? ownerByFid.get(fid) : undefined;
-    
-    if (dbId) {
-      if (owner === userEmail) {
-        tasks.push(
-          deleteDoc(doc(db, geomCollection, dbId))
-            .then(() => borrados++)
-            .catch(err => console.error("Error Firebase:", err))
-        );
-      } else {
-        alert(`No tienes permiso. Autor real: ${owner ?? 'desconocido'}`);
-        try { localDrafts.addLayer(layer); } catch {}
+    if (fid && docMap.has(fid)) {
+      const owner = ownerByFid.get(fid);
+      if (owner !== userEmail) {
+        alert(`Esta capa pertenece a ${owner}. No puedes editarla.`);
+        return;
       }
     }
-  });
-
-  if (tasks.length) await Promise.allSettled(tasks);
-  if (borrados > 0) {
-    const statusEl = document.getElementById('status');
-    if (statusEl) {
-      const temp = statusEl.innerHTML;
-      statusEl.innerHTML = `<span style="color:#10b981">🗑️ ${borrados} eliminados</span>`;
-      setTimeout(() => { statusEl.innerHTML = temp; }, 3000);
+    
+    const gj = layer.toGeoJSON();
+    ensureFID(gj);
+    const meta = layer.options.customMetadata || {};
+    const newLayer = L.geoJSON(gj).getLayers()[0];
+    newLayer.options.customMetadata = meta;
+    
+    if (newLayer instanceof L.Path) {
+      newLayer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
     }
-  }
+    newLayer.bindPopup(generarTablaPopup(meta.comentario, userEmail, "Editado", gj.properties));
+    
+    localDrafts.addLayer(newLayer);
+    markDirty(newLayer, meta);
+    
+    try { map.removeLayer(layer); } catch {}
+  });
+});
 
-  actualizarBoton();
+// Borrar geometría
+map.on(L.Draw.Event.DELETED, (e) => {
+  e.layers.eachLayer(async (layer) => {
+    const fid = getFIDFromLayer(layer);
+    if (!fid) return;
+    
+    const owner = ownerByFid.get(fid);
+    if (owner && owner !== userEmail) {
+      alert(`Esta capa pertenece a ${owner}. No puedes borrarla.`);
+      return;
+    }
+    
+    if (!docMap.has(fid)) {
+      pending.delete(fid);
+      actualizarBoton();
+      return;
+    }
+    
+    const docId = docMap.get(fid);
+    if (!confirm(`¿Borrar capa "${layer.options.customMetadata?.comentario ?? 'sin nombre'}" del servidor?`)) return;
+    
+    try {
+      await deleteDoc(doc(db, geomCollection, docId));
+      docMap.delete(fid);
+      ownerByFid.delete(fid);
+      pending.delete(fid);
+      actualizarBoton();
+      updateStatus(AREA_LABEL, docMap.size, Array.from(ownerByFid.values()).filter(a => a === userEmail).length);
+    } catch (err) {
+      console.error('Error al borrar:', err);
+      alert('Error al borrar: ' + (err?.message ?? 'desconocido'));
+    }
+  });
 });
 
 // ============================================================================
-// 3) Carga KML / GeoJSON
+// 3) CARGA DE ARCHIVOS (KML/GeoJSON)
 // ============================================================================
-document.getElementById('kmlInput').addEventListener('change', function (e) {
-  const file = e.target.files[0];
+document.getElementById('kmlInput').onchange = (ev) => {
+  const file = ev.target.files?.[0];
   if (!file) return;
-  const fileName = file.name.toLowerCase();
-  const reader = new FileReader();
   
-  const statusEl = document.getElementById('status');
-  if (statusEl) {
-    const temp = statusEl.innerHTML;
-    statusEl.innerHTML = `<span class="muted">📂 Leyendo ${escapeHTML(file.name)}...</span>`;
-    setTimeout(() => { statusEl.innerHTML = temp; }, 2000);
-  }
-
-  reader.onload = async (event) => {
+  const reader = new FileReader();
+  reader.onload = (e) => {
     try {
-      const content = event.target.result;
-      let layerToProcess;
-
-      if (fileName.endsWith('.kml')) {
+      const text = e.target.result;
+      
+      if (file.name.toLowerCase().endsWith('.kml')) {
         const parser = new DOMParser();
-        let kmlDOM = parser.parseFromString(content, 'text/xml');
-        
-        let docEl = kmlDOM.documentElement;
-        if (!docEl) {
-          if (statusEl) statusEl.innerHTML = `<span style="color:#ef4444">❌ KML inválido</span>`;
-          return;
-        }
-
-        if (!docEl.getAttribute('xmlns:xsi')) {
-          docEl.setAttribute('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance');
-        }
-
-        if (kmlDOM.querySelector('parsererror')) {
-          kmlDOM = parser.parseFromString(new XMLSerializer().serializeToString(kmlDOM), 'text/xml');
-          docEl = kmlDOM.documentElement;
-          if (!docEl || kmlDOM.querySelector('parsererror')) {
-            if (statusEl) statusEl.innerHTML = `<span style="color:#ef4444">❌ Error al parsear KML</span>`;
-            return;
-          }
-        }
-        
-        layerToProcess = omnivore.kml.parse(kmlDOM);
-        layerToProcess.on('ready', () => unificarYProcesar(layerToProcess, file.name));
+        const kmlDoc = parser.parseFromString(text, 'text/xml');
+        const layerGroup = omnivore.kml.parse(kmlDoc);
+        processLoadedLayers(layerGroup, file.name);
       } else {
-        layerToProcess = L.geoJSON(JSON.parse(content));
-        unificarYProcesar(layerToProcess, file.name);
+        const geojson = JSON.parse(text);
+        const layerGroup = L.geoJSON(geojson);
+        processLoadedLayers(layerGroup, file.name);
       }
     } catch (err) {
-      console.error(err);
-      if (statusEl) statusEl.innerHTML = `<span style="color:#ef4444">❌ Error al procesar archivo</span>`;
+      console.error('Error al cargar archivo:', err);
+      alert('Error al cargar archivo: ' + (err?.message ?? 'formato inválido'));
     }
   };
-  
   reader.readAsText(file);
-  e.target.value = '';
-});
+  ev.target.value = '';
+};
 
-async function unificarYProcesar(layerGroup, fileName) {
+function processLoadedLayers(layerGroup, fileName) {
   const all = [];
   layerGroup.eachLayer(l => all.push(l));
 
@@ -389,11 +407,14 @@ function initRealtime() {
     unsubscribeRT = null;
   }
 
+  console.log('🔄 [GIS] Iniciando listener en colección:', geomCollection);
   const colRef = collection(db, geomCollection);
   
   unsubscribeRT = onSnapshot(
     colRef,
     (snap) => {
+      console.log('✅ [GIS] Snapshot recibido:', snap.size, 'documentos');
+      
       // Limpiar TOC y capas de nube
       for (const a in gruposPorAutor) {
         try { map.removeLayer(gruposPorAutor[a]); } catch {}
@@ -420,7 +441,10 @@ function initRealtime() {
 
         dataByAutor[autor].forEach(item => {
           try {
+            // ✅ PATCH #6 (OPCIONAL): Si guardas como objeto, quitar JSON.parse
             const geoJSON = JSON.parse(item.feature);
+            // Para usar objeto directo: const geoJSON = item.feature;
+            
             const fid = ensureFID(geoJSON);
             
             ownerByFid.set(fid, autor);
@@ -440,7 +464,7 @@ function initRealtime() {
               l.addTo(grupo);
             });
           } catch (err) {
-            console.warn('Feature inválida en doc', item.id, err);
+            console.warn('⚠️ Feature inválida en doc', item.id, err);
           }
         });
 
@@ -455,17 +479,16 @@ function initRealtime() {
       actualizarBoton();
     },
     (err) => {
-      console.error('[onSnapshot] error:', err?.code, err);
+      console.error('❌ [GIS] Error en onSnapshot:', err?.code, err);
       updateStatus(AREA_LABEL, null, null, err?.code || 'desconocido');
     }
   );
 }
 
 // ============================================================================
-// 5) UI helpers (PATCH #2 - Popups con HTML correcto)
+// 5) UI helpers
 // ============================================================================
 function generarTablaPopup(titulo, autor, fecha, props = {}) {
-  // NO escapar las etiquetas HTML, solo los valores dinámicos
   let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${escapeHTML(titulo)}</h4>`;
   html += `<small style="color:gray">👤 ${escapeHTML(autor)}  📅 ${escapeHTML(fecha ?? '-')}</small><hr><table style="width:100%;font-size:11px">`;
   
@@ -508,7 +531,8 @@ document.getElementById('saveBtn').onclick = async () => {
 
       const ref = doc(db, geomCollection, fid);
       const payload = {
-        feature: JSON.stringify(gj),
+        // ✅ PATCH #6 (OPCIONAL): Guardar como objeto en vez de string
+        feature: JSON.stringify(gj),  // Para objeto: feature: gj,
         autor: userEmail,
         comentario: meta.comentario ?? "Sin nombre",
         archivo: meta.archivo ?? "Web",
@@ -533,7 +557,7 @@ document.getElementById('saveBtn').onclick = async () => {
       setTimeout(() => { statusEl.innerHTML = temp; }, 3000);
     }
   } catch (e) {
-    console.error('Error al guardar:', e?.code, e);
+    console.error('❌ Error al guardar:', e?.code, e);
     alert(e?.message ?? 'Error al guardar');
   } finally {
     isSaving = false;
@@ -543,12 +567,32 @@ document.getElementById('saveBtn').onclick = async () => {
 };
 
 // ============================================================================
-// 6) AUTH anónima y espera para iniciar realtime
+// 6) AUTH anónima y espera para iniciar realtime (✅ PATCH #3 y #4)
 // ============================================================================
-signInAnonymously(auth).catch(console.error);
+
+// ✅ PATCH #4: Timeout de 10 segundos para autenticación
+let authTimeout = setTimeout(() => {
+  if (!authReady) {
+    console.error('⏱️ [GIS] Timeout de autenticación (10s)');
+    updateStatus(AREA_LABEL, null, null, 'Timeout de autenticación. Recarga la página.');
+  }
+}, 10000);
+
+signInAnonymously(auth).catch(err => {
+  console.error('❌ [GIS] Error en signInAnonymously:', err?.code, err);
+  // ✅ PATCH #3: Mostrar error visualmente
+  updateStatus(AREA_LABEL, null, null, `Auth: ${err?.code || 'error desconocido'}`);
+  clearTimeout(authTimeout);
+});
 
 onAuthStateChanged(auth, (u) => {
   authReady = !!u;
+  
+  if (authReady) {
+    clearTimeout(authTimeout);
+    console.log('✅ [GIS] Usuario autenticado:', u.uid);
+  }
+  
   const userInfo = document.getElementById('userInfo');
   if (u && userInfo) userInfo.innerHTML = `👤 ${escapeHTML(userEmail)}`;
   
@@ -557,7 +601,12 @@ onAuthStateChanged(auth, (u) => {
     unsubscribeRT = null;
   }
   
-  if (authReady) initRealtime();
+  if (authReady) {
+    initRealtime();
+  } else {
+    console.warn('⚠️ [GIS] Auth no lista, esperando...');
+  }
+  
   actualizarBoton();
 });
 
