@@ -281,16 +281,15 @@ let authReady = false;
 const pending = new Map();
 
 function actualizarBoton() {
-    // Calculamos n: capas en localDrafts que no están en docMap (la nube)
+    // Detectamos si hay algo en el borrador que no esté en la base de datos
     const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
     const btn = document.getElementById('saveBtn');
     if (!btn) return;
 
-    // Lógica propuesta:
-    // Al inicio (n=0) deshabilitado. Si hay algo dibujado (n>0) habilitado.
+    // Solo habilitamos si hay algo nuevo para guardar
     btn.disabled = (n === 0);
     
-    // Texto fijo: Siempre "Guardar Cambios" sin paréntesis
+    // Texto limpio sin paréntesis, tal como propusiste
     btn.innerHTML = `💾 Guardar Cambios`;
 }
 
@@ -397,43 +396,64 @@ map.on(L.Draw.Event.DELETED, (e) => {
 // ============================================================================
 document.getElementById('saveBtn').onclick = async () => {
     const layers = localDrafts.getLayers();
-    if (layers.length === 0) return;
+    // Filtramos solo las que no han sido guardadas
+    const pendientes = layers.filter(l => !docMap.has(l._leaflet_id));
     
+    if (pendientes.length === 0 || isSaving) return;
+
+    if (!authReady || !auth.currentUser) {
+        alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
+        return;
+    }
+
     const btn = document.getElementById('saveBtn');
     btn.disabled = true;
     btn.innerHTML = `⏳ Guardando...`;
+    isSaving = true;
 
-    // Procesamos cada capa pendiente de forma secuencial
-    for (const layer of layers) {
-        if (docMap.has(layer._leaflet_id)) continue; 
-        try {
-            await addDoc(collection(db, `geometrias_${proyectoID}`), {
-                feature: JSON.stringify(layer.toGeoJSON()),
+    try {
+        const uid = auth.currentUser.uid;
+        
+        for (const layer of pendientes) {
+            const gj = layer.toGeoJSON();
+            
+            if (typeof validarTamanioDoc === 'function' && !validarTamanioDoc(gj)) continue;
+
+            // Guardamos en la colección normalizada (ej: geometrias_rancagua200)
+            await addDoc(collection(db, geomCollection), {
+                feature: JSON.stringify(gj),
                 autor: userEmail,
-                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
+                comentario: layer.options.customMetadata?.comentario || "Dibujo manual",
                 archivo: layer.options.customMetadata?.archivo || "Web",
+                area: areaNorm,
+                uid: uid,
                 fecha: new Date().toLocaleString('es-CL'),
                 timestamp: serverTimestamp()
             });
-            // Al remover la capa, n disminuirá
-            localDrafts.removeLayer(layer);
-        } catch (e) { 
-            console.error("Error al guardar:", e); 
-        }
-    }
 
-    // RESULTADO FINAL SEGÚN TU PROPUESTA:
-    // Deshabilitamos y fijamos el texto
-    btn.disabled = true;
-    btn.innerHTML = `💾 Guardar Cambios`;
-    
-    // Mostramos confirmación breve en la barra de estado
-    const statusEl = document.getElementById('status');
-    if (statusEl) {
-        statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados en ${proyectoID.toUpperCase()}</span>`;
+            // Al removerla del borrador, el mapa se limpia visualmente
+            localDrafts.removeLayer(layer);
+        }
+
+        // Feedback de éxito
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            const tempStatus = statusEl.innerHTML;
+            statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados</span>`;
+            setTimeout(() => { statusEl.innerHTML = tempStatus; }, 3000);
+        }
+
+    } catch (e) {
+        console.error('❌ Error al guardar:', e);
+        alert(`Error al guardar: ${e.message}`);
+    } finally {
+        isSaving = false;
+        // Al final: Deshabilitado y con el texto fijo que pediste
+        btn.disabled = true;
+        btn.innerHTML = `💾 Guardar Cambios`;
+        actualizarBoton(); 
     }
 };
-
 function processLoadedLayers(layerGroup, fileName) {
   const all = [];
   layerGroup.eachLayer(l => all.push(l));
