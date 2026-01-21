@@ -26,36 +26,69 @@ const proyectoID = urlParams.get('area') ?? 'general';
  * Función que fuerza la identificación.
  * Si no hay correo válido, el script no avanza.
  */
+/**
+ * Función que fuerza la identificación.
+ * Si no hay correo válido, el script no avanza.
+ * 
+ * COMPORTAMIENTO:
+ * ✅ Misma pestaña + refresh (F5) → NO pide correo (usa sessionStorage)
+ * ✅ Nueva pestaña/ventana → SÍ pide correo (sessionStorage es independiente por pestaña)
+ * ✅ Pegar URL en otra pestaña → SÍ pide correo
+ * 
+ * sessionStorage persiste durante la vida de la pestaña, incluso con refreshes,
+ * pero se elimina al cerrar la pestaña. Cada pestaña tiene su propio sessionStorage.
+ */
 function validarIdentidad() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   // 1) Intentar recuperar de la pestaña actual (sessionStorage)
+  //    Si existe y es válido → lo usamos sin pedir de nuevo
   let cached = null;
-  try { cached = sessionStorage.getItem('pucobre_user'); } catch {}
+  try { 
+    cached = sessionStorage.getItem('pucobre_user'); 
+  } catch {}
 
+  // Si hay un correo guardado Y es válido → lo retornamos directamente
+  // Esto permite que el F5/refresh NO pida el correo nuevamente
   if (cached && emailRegex.test(cached)) {
-    return cached; // Misma pestaña → no pedimos de nuevo
+    console.log('✅ Usuario recuperado de sessionStorage:', cached);
+    return cached; // ← Misma pestaña + refresh → no pedimos de nuevo
   }
 
-  // 2) Normaliza/rotula el área solo para el mensaje
+  // 2) Si NO hay correo guardado (nueva pestaña/ventana) → pedimos identificación
+  console.log('⚠️ No hay correo en sessionStorage, solicitando identificación...');
+  
+  // Normaliza/rotula el área solo para el mensaje
   const { area: areaNorm } = normalizeArea(urlParams.get('area') ?? 'general');
   const AREA_LABEL = (areaNorm || 'general').replace(/[-_]+/g, ' ').toUpperCase();
 
   // 3) Bucle hasta obtener un correo válido o cancelar (bloqueante)
   while (true) {
     const raw = prompt(`📍 Acceso al Área: ${AREA_LABEL}\nIngrese su correo corporativo para continuar:`);
+    
+    // Si el usuario cancela → bloqueamos el acceso
     if (raw === null) {
       alert("Acceso denegado. Se requiere identificación para usar el GIS.");
       throw new Error("Parada de seguridad: Sin identidad");
     }
 
     const email = String(raw).toLowerCase().trim();
+    
+    // Validamos el formato del correo
     if (emailRegex.test(email)) {
-      try { sessionStorage.setItem('pucobre_user', email); } catch {}
+      // ✅ Guardamos en sessionStorage para esta pestaña
+      // Esto permitirá que los refreshes NO pidan el correo nuevamente
+      try { 
+        sessionStorage.setItem('pucobre_user', email); 
+        console.log('✅ Correo guardado en sessionStorage:', email);
+      } catch (e) {
+        console.warn('⚠️ No se pudo guardar en sessionStorage:', e);
+      }
       return email;
     }
 
-    alert("❌ Formato de correo no válido.");
+    // Si el formato es inválido → mostramos error y volvemos a pedir
+    alert("❌ Formato de correo no válido. Por favor, ingrese un correo válido (ejemplo: usuario@empresa.com)");
   }
 }
 
