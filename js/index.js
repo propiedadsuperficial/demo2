@@ -14,22 +14,18 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
+
 // ============================================================================
 // 0) CONTROL DE ACCESO E IDENTIDAD (BLOQUEANTE)
 // ============================================================================
 
-
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
 
-const userEmail = validarIdentidad(); // ← seguirá pidiendo al abrir el link en una pestaña nueva
-if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
-
 /**
- * Función que fuerza la identificación. 
+ * Función que fuerza la identificación.
  * Si no hay correo válido, el script no avanza.
  */
-
 function validarIdentidad() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -51,6 +47,21 @@ function validarIdentidad() {
     if (raw === null) {
       alert("Acceso denegado. Se requiere identificación para usar el GIS.");
       throw new Error("Parada de seguridad: Sin identidad");
+    }
+
+    const email = String(raw).toLowerCase().trim();
+    if (emailRegex.test(email)) {
+      try { sessionStorage.setItem('pucobre_user', email); } catch {}
+      return email;
+    }
+
+    alert("❌ Formato de correo no válido.");
+  }
+}
+
+const userEmail = validarIdentidad(); // ← pedirá en cada pestaña/ventana nueva
+if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
+
     }
 
     const email = String(raw).toLowerCase().trim();
