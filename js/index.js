@@ -47,33 +47,7 @@ function validarIdentidad() {
     if (raw === null) {
       alert("Acceso denegado. Se requiere identificación para usar el GIS.");
       throw new Error("Parada de seguridad: Sin identidad");
-    }
 
-    const email = String(raw).toLowerCase().trim();
-    if (emailRegex.test(email)) {
-      try { sessionStorage.setItem('pucobre_user', email); } catch {}
-      return email;
-    }
-
-    alert("❌ Formato de correo no válido.");
-  }
-}
-
-const userEmail = validarIdentidad(); // ← pedirá en cada pestaña/ventana nueva
-if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
-
-    }
-
-    const email = String(raw).toLowerCase().trim();
-    if (emailRegex.test(email)) {
-      try { sessionStorage.setItem('pucobre_user', email); } catch {}
-      return email;
-    }
-
-    alert("❌ Formato de correo no válido.");
-  }
-}
-``
 
 
 const userEmail = validarIdentidad();
