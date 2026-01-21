@@ -281,14 +281,16 @@ let authReady = false;
 const pending = new Map();
 
 function actualizarBoton() {
+    // Calculamos n: capas en localDrafts que no están en docMap (la nube)
     const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
     const btn = document.getElementById('saveBtn');
     if (!btn) return;
 
-    // Solo habilitar si hay elementos nuevos (n > 0)
+    // Lógica propuesta:
+    // Al inicio (n=0) deshabilitado. Si hay algo dibujado (n>0) habilitado.
     btn.disabled = (n === 0);
     
-    // Texto fijo según tu propuesta
+    // Texto fijo: Siempre "Guardar Cambios" sin paréntesis
     btn.innerHTML = `💾 Guardar Cambios`;
 }
 
@@ -401,6 +403,7 @@ document.getElementById('saveBtn').onclick = async () => {
     btn.disabled = true;
     btn.innerHTML = `⏳ Guardando...`;
 
+    // Procesamos cada capa pendiente de forma secuencial
     for (const layer of layers) {
         if (docMap.has(layer._leaflet_id)) continue; 
         try {
@@ -412,24 +415,22 @@ document.getElementById('saveBtn').onclick = async () => {
                 fecha: new Date().toLocaleString('es-CL'),
                 timestamp: serverTimestamp()
             });
+            // Al remover la capa, n disminuirá
             localDrafts.removeLayer(layer);
         } catch (e) { 
             console.error("Error al guardar:", e); 
         }
     }
 
-    // Al finalizar, forzamos el estado deshabilitado y el texto limpio
+    // RESULTADO FINAL SEGÚN TU PROPUESTA:
+    // Deshabilitamos y fijamos el texto
     btn.disabled = true;
     btn.innerHTML = `💾 Guardar Cambios`;
     
-    // Feedback visual en el status para confirmar que terminó
+    // Mostramos confirmación breve en la barra de estado
     const statusEl = document.getElementById('status');
     if (statusEl) {
-        statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados</span>`;
-        // Después de 3 segundos restauramos la info del área
-        setTimeout(() => {
-            initRealtime(); // O la lógica que refresca el contador total
-        }, 3000);
+        statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados en ${proyectoID.toUpperCase()}</span>`;
     }
 };
 
