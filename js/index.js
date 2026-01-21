@@ -17,6 +17,11 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gsta
 // ============================================================================
 // 0) CONTROL DE ACCESO E IDENTIDAD (BLOQUEANTE)
 // ============================================================================
+
+
+const userEmail = validarIdentidad(); // ← seguirá pidiendo al abrir el link en una pestaña nueva
+if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
+
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
 
@@ -24,31 +29,41 @@ const proyectoID = urlParams.get('area') ?? 'general';
  * Función que fuerza la identificación. 
  * Si no hay correo válido, el script no avanza.
  */
+
 function validarIdentidad() {
-    let email = localStorage.getItem('pucobre_user');
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    while (!email || !emailRegex.test(email)) {
-        let input = prompt(`📍 Acceso al Área: ${proyectoID.toUpperCase()}\nIngrese su correo corporativo para continuar:`);
-        
-        if (input === null) {
-            alert("Acceso denegado. Se requiere identificación para usar el GIS.");
-            window.location.reload(); 
-            return null;
-        }
+  // 1) Intentar recuperar de la pestaña actual (sessionStorage)
+  let cached = null;
+  try { cached = sessionStorage.getItem('pucobre_user'); } catch {}
 
-        input = input.toLowerCase().trim();
-        if (emailRegex.test(input)) {
-            email = input;
-            try {
-                localStorage.setItem('pucobre_user', email);
-            } catch (e) { console.warn("Modo incógnito: sesión no persistente."); }
-        } else {
-            alert("❌ Formato de correo no válido.");
-        }
+  if (cached && emailRegex.test(cached)) {
+    return cached; // Misma pestaña → no pedimos de nuevo
+  }
+
+  // 2) Normaliza/rotula el área solo para el mensaje
+  const { area: areaNorm } = normalizeArea(urlParams.get('area') ?? 'general');
+  const AREA_LABEL = (areaNorm || 'general').replace(/[-_]+/g, ' ').toUpperCase();
+
+  // 3) Bucle hasta obtener un correo válido o cancelar (bloqueante)
+  while (true) {
+    const raw = prompt(`📍 Acceso al Área: ${AREA_LABEL}\nIngrese su correo corporativo para continuar:`);
+    if (raw === null) {
+      alert("Acceso denegado. Se requiere identificación para usar el GIS.");
+      throw new Error("Parada de seguridad: Sin identidad");
     }
-    return email;
+
+    const email = String(raw).toLowerCase().trim();
+    if (emailRegex.test(email)) {
+      try { sessionStorage.setItem('pucobre_user', email); } catch {}
+      return email;
+    }
+
+    alert("❌ Formato de correo no válido.");
+  }
 }
+``
+
 
 const userEmail = validarIdentidad();
 if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
