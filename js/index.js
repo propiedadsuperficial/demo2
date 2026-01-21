@@ -626,88 +626,74 @@ function generarTablaPopup(titulo, autor, fecha, props = {}) {
   return html + `</table></div>`;
 }
 
-// Guardar (idempotente por FID)
 document.getElementById('saveBtn').onclick = async () => {
-  if (pending.size === 0 || isSaving) return;
-  
-  if (!authReady || !auth.currentUser) {
-    alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
-    return;
-  }
+    // 1. Verificamos capas directamente en el mapa
+    const layers = localDrafts.getLayers();
+    if (layers.length === 0 || isSaving) return;
 
-  const btn = document.getElementById('saveBtn');
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Guardando...';
-  isSaving = true;
-
-  try {
-    const uid = auth.currentUser.uid;
-    const ops = [];
-    
-    for (const [fid, entry] of pending.entries()) {
-      const layer = entry.layer;
-      const meta  = entry.meta || {};
-      const gj    = layer.toGeoJSON();
-      ensureFID(gj);
-      
-      // ✅ Validar tamaño antes de guardar
-      if (!validarTamanioDoc(gj)) {
-        console.warn('Omitiendo documento muy grande:', fid);
-        continue;
-      }
-
-      const ref = doc(db, geomCollection, fid);
-      const payload = {
-        feature: JSON.stringify(gj),  // Puedes cambiar a: feature: gj (objeto)
-        autor: userEmail,
-        comentario: meta.comentario ?? "Sin nombre",
-        archivo: meta.archivo ?? "Web",
-        area: areaNorm,
-        uid,
-        fecha: new Date().toLocaleString('es-CL'),
-        timestamp: serverTimestamp()
-      };
-      ops.push(setDoc(ref, payload, { merge: true }));
+    if (!authReady || !auth.currentUser) {
+        alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
+        return;
     }
 
-    if (ops.length === 0) {
-      alert('No hay cambios válidos para guardar (todos los documentos superan 1 MiB)');
-      return;
-    }
+    const btn = document.getElementById('saveBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Guardando...';
+    isSaving = true;
 
-    await Promise.all(ops);
+    try {
+        const uid = auth.currentUser.uid;
+        
+        for (const layer of layers) {
+            // Saltamos si ya está en la nube para no duplicar
+            if (docMap.has(layer._leaflet_id)) continue;
 
-    localDrafts.clearLayers();
-    pending.clear();
-    actualizarBoton();
+            const gj = layer.toGeoJSON();
+            
+            // ✅ Mantenemos la validación de tamaño por seguridad
+            if (typeof validarTamanioDoc === 'function' && !validarTamanioDoc(gj)) {
+                console.warn('Omitiendo documento muy grande');
+                continue;
+            }
 
-    const statusEl = document.getElementById('status');
-    if (statusEl) {
-      const temp = statusEl.innerHTML;
-      statusEl.innerHTML = `<span style="color:#10b981">✅ ${ops.length} cambios guardados</span>`;
-      setTimeout(() => { statusEl.innerHTML = temp; }, 3000);
+            // ✅ CAMBIO CLAVE: Usamos addDoc con la colección dinámica
+            // Esto asegura que líneas y polígonos pesados entren sin errores de ID
+            await addDoc(collection(db, `geometrias_${proyectoID}`), {
+                feature: JSON.stringify(gj),
+                autor: userEmail,
+                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
+                archivo: layer.options.customMetadata?.archivo || "Web",
+                area: proyectoID,
+                uid: uid,
+                fecha: new Date().toLocaleString('es-CL'),
+                timestamp: serverTimestamp()
+            });
+
+            // Limpiamos la capa del borrador local tras éxito
+            localDrafts.removeLayer(layer);
+        }
+
+        // Limpieza de memoria secundaria
+        if (typeof pending !== 'undefined') pending.clear();
+        actualizarBoton();
+
+        // Feedback visual de éxito
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            const currentStatus = statusEl.innerHTML;
+            statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados en ${proyectoID}</span>`;
+            setTimeout(() => { statusEl.innerHTML = currentStatus; }, 3000);
+        }
+
+    } catch (e) {
+        console.error('❌ Error al guardar:', e);
+        alert(`Error al guardar: ${e.message}\nColección: geometrias_${proyectoID}`);
+    } finally {
+        isSaving = false;
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
-  } catch (e) {
-    console.error('❌ Error al guardar:', e?.code, e);
-    
-    let errorMsg = '❌ Error al guardar en Firebase\n\n';
-    errorMsg += `Código: ${e?.code || 'desconocido'}\n`;
-    errorMsg += `Mensaje: ${e?.message || 'Error inesperado'}\n\n`;
-    
-    if (e?.code === 'permission-denied') {
-      errorMsg += '💡 Solución:\n';
-      errorMsg += '1. Verifica las Reglas de Firestore\n';
-      errorMsg += '2. Asegúrate de estar autenticado\n';
-      errorMsg += `3. Colección: ${geomCollection}`;
-    }
-    
-    alert(errorMsg);
-  } finally {
-    isSaving = false;
-    btn.disabled = false;
-    btn.textContent = originalText;
-  }
 };
 
 // ============================================================================
