@@ -280,18 +280,7 @@ let authReady = false;
 // ============================================================================
 const pending = new Map();
 
-function actualizarBoton() {
-    // Detectamos si hay algo en el borrador que no esté en la base de datos
-    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
-    const btn = document.getElementById('saveBtn');
-    if (!btn) return;
 
-    // Solo habilitamos si hay algo nuevo para guardar
-    btn.disabled = (n === 0);
-    
-    // Texto limpio sin paréntesis, tal como propusiste
-    btn.innerHTML = `💾 Guardar Cambios`;
-}
 
 // ============================================================================
 // 2) Dibujo y borrado
