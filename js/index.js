@@ -1,22 +1,25 @@
-// js/index.js — VERSIÓN FINAL A PRUEBA DE BALAS
-// ✅ Todos los errores corregidos
-// ✅ App Check (opcional con flag)
-// ✅ Validación de 1 MiB
-// ✅ Lectura tolerante (string/objeto)
-// ✅ Indicador online/offline
+// js/index.js — VERSIÓN CORREGIDA POST-AUDITORÍA
+// ✅ Todos los errores críticos corregidos
+// ✅ markDirty() definida
+// ✅ addDoc importado
+// ✅ saveBtn.onclick unificado
+// ✅ Event handler de KML agregado
+// ✅ Lógica de actualizarBoton() corregida
+// ✅ Uso consistente de geomCollection
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
-  getFirestore, collection, setDoc, onSnapshot, deleteDoc, doc, serverTimestamp, getDocs,
-  enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence
+  getFirestore, collection, setDoc, addDoc, onSnapshot, deleteDoc, doc, 
+  serverTimestamp, getDocs, enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence
 } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
 // ============================================================================
 // 0) CONFIG + FLAGS
 // ============================================================================
-const ENABLE_APP_CHECK = false; // ← Cambiar a true si App Check está en "Aplicación obligatoria"
-const MAX_DOC_SIZE_MB = 1;      // Límite de tamaño de documento
+const ENABLE_APP_CHECK = false;
+const MAX_DOC_SIZE_MB = 1;
+const KML_LOAD_TIMEOUT = 2000; // ms - timeout para carga de KML
 
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
@@ -43,7 +46,7 @@ if (ENABLE_APP_CHECK) {
   import('https://www.gstatic.com/firebasejs/10.10.0/firebase-app-check.js')
     .then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
       const appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaV3Provider('6LfXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'), // ← Reemplazar con tu Site Key
+        provider: new ReCaptchaV3Provider('6LfXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'),
         isTokenAutoRefreshEnabled: true
       });
       console.log('✅ [GIS] App Check inicializado');
@@ -140,16 +143,14 @@ function escapeHTML(s = '') {
 }
 
 // ============================================================================
-// 0.8) PARSE SEGURO DE JSON (evita crashes con datos corruptos)
+// 0.4) PARSE SEGURO DE JSON
 // ============================================================================
 function safeParseJSON(raw) {
   if (typeof raw !== 'string') return null;
   const s = raw.trim();
-  // Filtrar casos vacíos o 'undefined'/'null' textuales
   if (!s || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return null;
   try {
     const obj = JSON.parse(s);
-    // Chequeo mínimo de estructura GeoJSON
     if (obj && (obj.type || obj.features || obj.geometry)) return obj;
     return null;
   } catch {
@@ -161,7 +162,7 @@ const AREA_LABEL = areaDisplay(areaNorm);
 document.title = `GIS Pucobre — ${AREA_LABEL}`;
 
 // ============================================================================
-// 0.4) HELPER PARA ACTUALIZAR STATUS
+// 0.5) HELPER PARA ACTUALIZAR STATUS
 // ============================================================================
 function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = null, fromCache = false) {
   const statusEl = document.getElementById('status');
@@ -189,7 +190,7 @@ function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = nul
 updateStatus(AREA_LABEL, null, null, null);
 
 // ============================================================================
-// 0.5) TEST DE PERMISOS AL INICIO
+// 0.6) TEST DE PERMISOS AL INICIO
 // ============================================================================
 async function testPermisos() {
   console.log('🔐 [GIS] Probando permisos de lectura...');
@@ -216,7 +217,7 @@ async function testPermisos() {
 }
 
 // ============================================================================
-// 0.6) VALIDACIÓN DE TAMAÑO
+// 0.7) VALIDACIÓN DE TAMAÑO
 // ============================================================================
 function validarTamanioDoc(geojson) {
   const sizeBytes = new Blob([JSON.stringify(geojson)]).size;
@@ -236,7 +237,7 @@ function validarTamanioDoc(geojson) {
 }
 
 // ============================================================================
-// 0.7) Utilidades de FID persistente
+// 0.8) Utilidades de FID persistente
 // ============================================================================
 const newFID = () => (crypto?.randomUUID?.() ?? (Date.now() + '-' + Math.random().toString(36).slice(2)));
 
@@ -267,8 +268,8 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 window.map = map;
 
 const localDrafts = L.featureGroup().addTo(map);
-const docMap = new Map();
-const ownerByFid = new Map();
+const docMap = new Map(); // FID → Document ID
+const ownerByFid = new Map(); // FID → Email
 const gruposPorAutor = {};
 const layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
 
@@ -278,16 +279,43 @@ let authReady = false;
 // ============================================================================
 // 1.1) Pendientes por FID
 // ============================================================================
-const pending = new Map();
+const pending = new Map(); // FID → {layer, meta}
 
+/**
+ * Actualiza el estado del botón de guardar
+ * Cuenta los cambios pendientes en el Map
+ */
 function actualizarBoton() {
-    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
-    const btn = document.getElementById('saveBtn');
-    if (!btn) return;
+  const btn = document.getElementById('saveBtn');
+  if (!btn) return;
+  
+  const p = pending.size;
+  btn.textContent = p ? `💾 Guardar Cambios (${p})` : `💾 Guardar Cambios`;
+  btn.disabled = !(authReady && p > 0);
+}
 
-    btn.disabled = (n === 0);
-    // Texto fijo sin variables, para que no aparezcan números
-    btn.innerHTML = `💾 Guardar Cambios`;
+/**
+ * Marca una capa como modificada y la agrega al Map de pendientes
+ * @param {L.Layer} layer - Capa de Leaflet
+ * @param {Object} extraMeta - Metadatos adicionales
+ * @returns {string} FID de la capa
+ */
+function markDirty(layer, extraMeta = {}) {
+  const gj = layer.toGeoJSON();
+  const fid = ensureFID(gj);
+  
+  if (!layer.feature) layer.feature = gj;
+  if (!layer.feature.properties) layer.feature.properties = {};
+  layer.feature.properties.__fid = fid;
+  
+  layer.options.customMetadata = { 
+    ...(layer.options.customMetadata || {}), 
+    ...extraMeta 
+  };
+  
+  pending.set(fid, { layer, meta: layer.options.customMetadata });
+  actualizarBoton();
+  return fid;
 }
 
 // ============================================================================
@@ -305,11 +333,15 @@ map.on(L.Draw.Event.CREATED, (e) => {
   ensureFID(gj);
   forceNewFIDIfHijack(gj);
   
-  // ✅ Validar tamaño
   if (!validarTamanioDoc(gj)) return;
   
   const layer = L.geoJSON(gj).getLayers()[0];
-  const comentario = prompt("Nombre/Descripción:") ?? "Dibujo manual";
+  let comentario = prompt("Nombre/Descripción:");
+  if (!comentario || comentario.trim().length === 0) {
+    comentario = "Dibujo manual";
+  }
+  comentario = comentario.trim().substring(0, 100); // Limitar longitud
+  
   layer.options.customMetadata = { comentario, autor: userEmail, archivo: "Web" };
 
   if (layer instanceof L.Path) {
@@ -335,7 +367,6 @@ map.on(L.Draw.Event.EDITED, (e) => {
     const gj = layer.toGeoJSON();
     ensureFID(gj);
     
-    // ✅ Validar tamaño
     if (!validarTamanioDoc(gj)) return;
     
     const meta = layer.options.customMetadata || {};
@@ -391,66 +422,48 @@ map.on(L.Draw.Event.DELETED, (e) => {
 // ============================================================================
 // 3) CARGA DE ARCHIVOS (KML/GeoJSON)
 // ============================================================================
-document.getElementById('saveBtn').onclick = async () => {
-    const layers = localDrafts.getLayers();
-    // Filtramos solo las que no han sido guardadas
-    const pendientes = layers.filter(l => !docMap.has(l._leaflet_id));
-    
-    if (pendientes.length === 0 || isSaving) return;
-
-    if (!authReady || !auth.currentUser) {
-        alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
-        return;
-    }
-
-    const btn = document.getElementById('saveBtn');
-    btn.disabled = true;
-    btn.innerHTML = `⏳ Guardando...`;
-    isSaving = true;
-
+document.getElementById('kmlInput').onchange = (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
     try {
-        const uid = auth.currentUser.uid;
+      const text = e.target.result;
+      
+      if (file.name.toLowerCase().endsWith('.kml')) {
+        const parser = new DOMParser();
+        const kmlDoc = parser.parseFromString(text, 'text/xml');
+        const layerGroup = omnivore.kml.parse(kmlDoc);
         
-        for (const layer of pendientes) {
-            const gj = layer.toGeoJSON();
-            
-            if (typeof validarTamanioDoc === 'function' && !validarTamanioDoc(gj)) continue;
-
-            // Guardamos en la colección normalizada (ej: geometrias_rancagua200)
-            await addDoc(collection(db, geomCollection), {
-                feature: JSON.stringify(gj),
-                autor: userEmail,
-                comentario: layer.options.customMetadata?.comentario || "Dibujo manual",
-                archivo: layer.options.customMetadata?.archivo || "Web",
-                area: areaNorm,
-                uid: uid,
-                fecha: new Date().toLocaleString('es-CL'),
-                timestamp: serverTimestamp()
-            });
-
-            // Al removerla del borrador, el mapa se limpia visualmente
-            localDrafts.removeLayer(layer);
-        }
-
-        // Feedback de éxito
-        const statusEl = document.getElementById('status');
-        if (statusEl) {
-            const tempStatus = statusEl.innerHTML;
-            statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados</span>`;
-            setTimeout(() => { statusEl.innerHTML = tempStatus; }, 3000);
-        }
-
-    } catch (e) {
-        console.error('❌ Error al guardar:', e);
-        alert(`Error al guardar: ${e.message}`);
-    } finally {
-        isSaving = false;
-        // Al final: Deshabilitado y con el texto fijo que pediste
-        btn.disabled = true;
-        btn.innerHTML = `💾 Guardar Cambios`;
-        actualizarBoton(); 
+        layerGroup.on('ready', () => {
+          processLoadedLayers(layerGroup, file.name);
+        });
+        
+        setTimeout(() => {
+          if (layerGroup.getLayers().length > 0) {
+            processLoadedLayers(layerGroup, file.name);
+          }
+        }, KML_LOAD_TIMEOUT);
+      } else {
+        const geojson = JSON.parse(text);
+        const layerGroup = L.geoJSON(geojson);
+        processLoadedLayers(layerGroup, file.name);
+      }
+    } catch (err) {
+      console.error('Error al cargar archivo:', err);
+      alert('Error al cargar archivo: ' + (err?.message ?? 'formato inválido'));
     }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
 };
+
+/**
+ * Procesa las capas cargadas desde un archivo KML/GeoJSON
+ * @param {L.LayerGroup} layerGroup - Grupo de capas de Leaflet
+ * @param {string} fileName - Nombre del archivo origen
+ */
 function processLoadedLayers(layerGroup, fileName) {
   const all = [];
   layerGroup.eachLayer(l => all.push(l));
@@ -459,7 +472,6 @@ function processLoadedLayers(layerGroup, fileName) {
     const base = all[i];
     const gj = base.toGeoJSON();
     
-    // ✅ Validar tamaño de cada geometría
     if (!validarTamanioDoc(gj)) {
       console.warn(`Geometría ${i+1} muy grande, omitida`);
       continue;
@@ -541,10 +553,9 @@ async function initRealtime() {
           : `👤 ${autor} (${dataByAutor[autor].length})`;
 
         dataByAutor[autor].forEach(item => {
-          const docId = item.id; // ← Guardar ID para logs
+          const docId = item.id;
           
           try {
-            // ✅ LECTURA TOLERANTE + SEGURA (evita JSON.parse sobre undefined/vacío)
             let geoJSON = null;
             
             if (typeof item.feature === 'string') {
@@ -575,9 +586,7 @@ async function initRealtime() {
               ? item.timestamp.toDate().toLocaleString('es-CL')
               : (item.fecha ?? '-');
             
-            // ✅ Configuración de capa con soporte para Points
             const layer = L.geoJSON(geoJSON, {
-              // ✅ IMPORTANTE: pointToLayer para puntos (markers)
               pointToLayer: (feature, latlng) => {
                 return L.marker(latlng);
               },
@@ -598,7 +607,6 @@ async function initRealtime() {
             console.error(`   Autor: ${autor}`);
             console.error(`   Comentario: ${item.comentario || 'sin nombre'}`);
             console.error(`   Feature (primeros 100 chars):`, String(item.feature).substring(0, 100));
-            // Continuar con siguiente documento
           }
         });
 
@@ -621,6 +629,14 @@ async function initRealtime() {
 // ============================================================================
 // 5) UI helpers
 // ============================================================================
+/**
+ * Genera el HTML para el popup de una geometría
+ * @param {string} titulo - Título de la geometría
+ * @param {string} autor - Email del autor
+ * @param {string} fecha - Fecha de creación/edición
+ * @param {Object} props - Propiedades GeoJSON
+ * @returns {string} HTML del popup
+ */
 function generarTablaPopup(titulo, autor, fecha, props = {}) {
   let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${escapeHTML(titulo)}</h4>`;
   html += `<small style="color:gray">👤 ${escapeHTML(autor)}  📅 ${escapeHTML(fecha ?? '-')}</small><hr><table style="width:100%;font-size:11px">`;
@@ -637,78 +653,93 @@ function generarTablaPopup(titulo, autor, fecha, props = {}) {
   return html + `</table></div>`;
 }
 
+// ============================================================================
+// 6) GUARDAR CAMBIOS
+// ============================================================================
 document.getElementById('saveBtn').onclick = async () => {
-    // 1. Verificamos capas directamente en el mapa
-    const layers = localDrafts.getLayers();
-    if (layers.length === 0 || isSaving) return;
+  if (pending.size === 0 || isSaving) return;
+  
+  if (!authReady || !auth.currentUser) {
+    alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
+    return;
+  }
 
-    if (!authReady || !auth.currentUser) {
-        alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
-        return;
+  const btn = document.getElementById('saveBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Guardando...';
+  isSaving = true;
+
+  try {
+    const uid = auth.currentUser.uid;
+    const ops = [];
+    
+    for (const [fid, entry] of pending.entries()) {
+      const layer = entry.layer;
+      const meta  = entry.meta || {};
+      const gj    = layer.toGeoJSON();
+      ensureFID(gj);
+      
+      if (!validarTamanioDoc(gj)) {
+        console.warn('Omitiendo documento muy grande:', fid);
+        continue;
+      }
+
+      const ref = doc(db, geomCollection, fid);
+      const payload = {
+        feature: JSON.stringify(gj),
+        autor: userEmail,
+        comentario: meta.comentario ?? "Sin nombre",
+        archivo: meta.archivo ?? "Web",
+        area: areaNorm,
+        uid,
+        fecha: new Date().toLocaleString('es-CL'),
+        timestamp: serverTimestamp()
+      };
+      ops.push(setDoc(ref, payload, { merge: true }));
     }
 
-    const btn = document.getElementById('saveBtn');
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⏳ Guardando...';
-    isSaving = true;
-
-    try {
-        const uid = auth.currentUser.uid;
-        
-        for (const layer of layers) {
-            // Saltamos si ya está en la nube para no duplicar
-            if (docMap.has(layer._leaflet_id)) continue;
-
-            const gj = layer.toGeoJSON();
-            
-            // ✅ Mantenemos la validación de tamaño por seguridad
-            if (typeof validarTamanioDoc === 'function' && !validarTamanioDoc(gj)) {
-                console.warn('Omitiendo documento muy grande');
-                continue;
-            }
-
-            // ✅ CAMBIO CLAVE: Usamos addDoc con la colección dinámica
-            // Esto asegura que líneas y polígonos pesados entren sin errores de ID
-            await addDoc(collection(db, `geometrias_${proyectoID}`), {
-                feature: JSON.stringify(gj),
-                autor: userEmail,
-                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
-                archivo: layer.options.customMetadata?.archivo || "Web",
-                area: proyectoID,
-                uid: uid,
-                fecha: new Date().toLocaleString('es-CL'),
-                timestamp: serverTimestamp()
-            });
-
-            // Limpiamos la capa del borrador local tras éxito
-            localDrafts.removeLayer(layer);
-        }
-
-        // Limpieza de memoria secundaria
-        if (typeof pending !== 'undefined') pending.clear();
-        actualizarBoton();
-
-        // Feedback visual de éxito
-        const statusEl = document.getElementById('status');
-        if (statusEl) {
-            const currentStatus = statusEl.innerHTML;
-            statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados en ${proyectoID}</span>`;
-            setTimeout(() => { statusEl.innerHTML = currentStatus; }, 3000);
-        }
-
-    } catch (e) {
-        console.error('❌ Error al guardar:', e);
-        alert(`Error al guardar: ${e.message}\nColección: geometrias_${proyectoID}`);
-    } finally {
-        isSaving = false;
-        btn.disabled = false;
-        btn.textContent = originalText;
+    if (ops.length === 0) {
+      alert('No hay cambios válidos para guardar (todos los documentos superan 1 MiB)');
+      return;
     }
+
+    await Promise.all(ops);
+
+    localDrafts.clearLayers();
+    pending.clear();
+    actualizarBoton();
+
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+      const temp = statusEl.innerHTML;
+      statusEl.innerHTML = `<span style="color:#10b981">✅ ${ops.length} cambios guardados</span>`;
+      setTimeout(() => { statusEl.innerHTML = temp; }, 3000);
+    }
+  } catch (e) {
+    console.error('❌ Error al guardar:', e?.code, e);
+    
+    let errorMsg = '❌ Error al guardar en Firebase\n\n';
+    errorMsg += `Código: ${e?.code || 'desconocido'}\n`;
+    errorMsg += `Mensaje: ${e?.message || 'Error inesperado'}\n\n`;
+    
+    if (e?.code === 'permission-denied') {
+      errorMsg += '💡 Solución:\n';
+      errorMsg += '1. Verifica las Reglas de Firestore\n';
+      errorMsg += '2. Asegúrate de estar autenticado\n';
+      errorMsg += `3. Colección: ${geomCollection}`;
+    }
+    
+    alert(errorMsg);
+  } finally {
+    isSaving = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 };
 
 // ============================================================================
-// 6) AUTH anónima
+// 7) AUTH anónima
 // ============================================================================
 let authTimeout = setTimeout(() => {
   if (!authReady) {
@@ -732,7 +763,7 @@ onAuthStateChanged(auth, (u) => {
   }
   
   const userInfo = document.getElementById('userInfo');
-  if (u && userInfo) userInfo.innerHTML = `👤 ${escapeHTML(userEmail)}`;
+  if (u && userInfo) userInfo.textContent = `👤 ${userEmail}`;
   
   if (unsubscribeRT) {
     unsubscribeRT();
@@ -749,7 +780,7 @@ onAuthStateChanged(auth, (u) => {
 });
 
 // ============================================================================
-// 7) Inicialización
+// 8) Inicialización
 // ============================================================================
 actualizarBoton();
 
