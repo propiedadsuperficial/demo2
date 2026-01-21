@@ -15,349 +15,102 @@ import {
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
 
 // ============================================================================
-// 0) CONFIG + FLAGS
+// 0) CONTROL DE ACCESO E IDENTIDAD (BLOQUEANTE)
 // ============================================================================
-const ENABLE_APP_CHECK = false;
-const MAX_DOC_SIZE_MB = 1;
-const KML_LOAD_TIMEOUT = 2000; // ms - timeout para carga de KML
-
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
-const latInicial = parseFloat(urlParams.get('lat'))  ?? -27.366;
-const lngInicial = parseFloat(urlParams.get('lng'))  ?? -70.332;
-const zoomInicial= parseInt(urlParams.get('zoom'))   ?? 14;
 
-const firebaseConfig = {
-  apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
-  authDomain: "gis-pucobre.firebaseapp.com",
-  projectId: "gis-pucobre",
-  storageBucket: "gis-pucobre.appspot.com",
-  messagingSenderId: "654550355942",
-  appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
-};
-const app  = initializeApp(firebaseConfig);
-const db   = getFirestore(app);
-const auth = getAuth(app);
+/**
+ * Función que fuerza la identificación. 
+ * Si no hay correo válido, el script no avanza.
+ */
+function validarIdentidad() {
+    let email = localStorage.getItem('pucobre_user');
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// ============================================================================
-// 0.1) APP CHECK (si está habilitado)
-// ============================================================================
-if (ENABLE_APP_CHECK) {
-  import('https://www.gstatic.com/firebasejs/10.10.0/firebase-app-check.js')
-    .then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
-      const appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaV3Provider('6LfXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'),
-        isTokenAutoRefreshEnabled: true
-      });
-      console.log('✅ [GIS] App Check inicializado');
-    })
-    .catch(err => {
-      console.error('❌ [GIS] Error al inicializar App Check:', err);
-    });
+    while (!email || !emailRegex.test(email)) {
+        let input = prompt(`📍 Acceso al Área: ${proyectoID.toUpperCase()}\nIngrese su correo corporativo para continuar:`);
+        
+        if (input === null) {
+            alert("Acceso denegado. Se requiere identificación para usar el GIS.");
+            window.location.reload(); 
+            return null;
+        }
+
+        input = input.toLowerCase().trim();
+        if (emailRegex.test(input)) {
+            email = input;
+            try {
+                localStorage.setItem('pucobre_user', email);
+            } catch (e) { console.warn("Modo incógnito: sesión no persistente."); }
+        } else {
+            alert("❌ Formato de correo no válido.");
+        }
+    }
+    return email;
 }
 
-// Habilitar persistencia offline multi-tab con fallback
-enableMultiTabIndexedDbPersistence(db).catch((err) => {
-  if (err?.code === 'failed-precondition') {
-    console.warn('Multi-tab no disponible, intento single-tab…');
-    return enableIndexedDbPersistence(db).catch((err2) => {
-      if (err2?.code === 'unimplemented') {
-        console.warn('IndexedDB no soportado; sin cache offline.');
-      } else {
-        console.warn('Sin persistencia offline:', err2?.code || err2);
-      }
-    });
-  }
-  if (err?.code === 'unimplemented') {
-    console.warn('IndexedDB no soportado; sin cache offline.');
-  } else {
-    console.warn('Persistencia: error inesperado:', err?.code || err);
-  }
-});
-
-// Identidad simple
-let userEmail = localStorage.getItem('pucobre_user');
-if (!userEmail || !userEmail.includes('@')) {
-  userEmail = prompt("Ingrese correo corporativo:");
-  if (userEmail && userEmail.includes('@')) {
-    localStorage.setItem('pucobre_user', userEmail.toLowerCase().trim());
-  } else {
-    alert("Acceso denegado.");
-    throw new Error("Sin auth");
-  }
-}
+const userEmail = validarIdentidad();
+if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
 
 // ============================================================================
 // 0.2) NORMALIZACIÓN DE ÁREA → COLECCIÓN
 // ============================================================================
 function normalizeArea(raw) {
-  const s = String(raw ?? '').toLowerCase().trim();
-  const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
-  
-  const isPozo13 = ['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => 
-    x.replace(/\s+/g, '').replace(/-/g, '_')
-  ).includes(s2);
-  
-  if (isPozo13) {
-    return { area: 'pozo13', collection: 'geometrias_pozo13' };
-  }
-  
-  const isRol234 = [
-    'rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', 'rol23 4',
-    '23_4', '234', '23-4', '23 4',
-    'rdz2_4', 'rdz_2_4', 'rdz24', 'rdz 2 4'
-  ].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2);
-  
-  if (isRol234) {
-    return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
-  }
-  
-  return { area: s2 || 'general', collection: 'geometrias' };
+    const s = String(raw ?? '').toLowerCase().trim();
+    const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
+    
+    // Lógica para POZO 13
+    if (['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2)) {
+        return { area: 'pozo13', collection: 'geometrias_pozo13' };
+    }
+    
+    // Lógica para ROL 23-4
+    const isRol234 = ['rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', '23_4', '234'].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2);
+    if (isRol234) {
+        return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
+    }
+    
+    return { area: s2 || 'general', collection: 'geometrias' };
 }
 
 const { area: areaNorm, collection: geomCollection } = normalizeArea(proyectoID);
-
-console.log('🗺️ [GIS] Área solicitada:', proyectoID);
-console.log('🗺️ [GIS] Área normalizada:', areaNorm);
-console.log('🗺️ [GIS] Colección Firestore:', geomCollection);
-
-// ============================================================================
-// 0.3) FORMATEO Y ESCAPADO
-// ============================================================================
-function areaDisplay(norm) {
-  const known = {
-    'pozo13': 'POZO 13',
-    'rol23_4': 'ROL 23-4',
-    'general': 'GENERAL'
-  };
-  return known[norm] ?? norm.replace(/[-_]+/g, ' ').toUpperCase();
-}
-
-function escapeHTML(s = '') {
-  return String(s)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-// ============================================================================
-// 0.4) PARSE SEGURO DE JSON
-// ============================================================================
-function safeParseJSON(raw) {
-  if (typeof raw !== 'string') return null;
-  const s = raw.trim();
-  if (!s || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return null;
-  try {
-    const obj = JSON.parse(s);
-    if (obj && (obj.type || obj.features || obj.geometry)) return obj;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-const AREA_LABEL = areaDisplay(areaNorm);
+const AREA_LABEL = areaNorm.replace(/[-_]+/g, ' ').toUpperCase();
 document.title = `GIS Pucobre — ${AREA_LABEL}`;
 
 // ============================================================================
-// 0.5) HELPER PARA ACTUALIZAR STATUS
+// 1) INICIALIZACIÓN DE INSTANCIAS (FIREBASE & MAPA)
 // ============================================================================
-function updateStatus(areaLabel, totalCapas = null, misCapas = null, error = null, fromCache = false) {
-  const statusEl = document.getElementById('status');
-  if (!statusEl) return;
-  
-  const collectionBadge = `<span style="font-size:10px;opacity:0.6;margin-left:8px">[${geomCollection}]</span>`;
-  const cacheBadge = fromCache ? ` <span style="font-size:10px;opacity:0.6">🔌 Offline</span>` : '';
-  
-  let html = `<span class="chip chip--area">ÁREA: ${escapeHTML(areaLabel)}</span>${collectionBadge}${cacheBadge}`;
-  
-  if (error) {
-    html += `<span class="muted" style="color:#ef4444;margin-left:8px">· Error: ${escapeHTML(error)}</span>`;
-  } else if (totalCapas !== null) {
-    html += `<span class="muted" style="margin-left:8px">· Total: ${totalCapas} capas</span>`;
-    if (misCapas !== null && misCapas > 0) {
-      html += `<span class="chip chip--mine" title="Capas propias visibles en esta área" style="margin-left:8px">MIS CAPAS (${misCapas})</span>`;
-    }
-  } else {
-    html += `<span class="muted" style="color:#f59e0b;margin-left:8px">· Conectando...</span>`;
-  }
-  
-  statusEl.innerHTML = html;
-}
+const firebaseConfig = {
+    apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
+    authDomain: "gis-pucobre.firebaseapp.com",
+    projectId: "gis-pucobre",
+    storageBucket: "gis-pucobre.appspot.com",
+    messagingSenderId: "654550355942",
+    appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
+};
 
-updateStatus(AREA_LABEL, null, null, null);
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const auth = getAuth(app);
 
-// ============================================================================
-// 0.6) TEST DE PERMISOS AL INICIO
-// ============================================================================
-async function testPermisos() {
-  console.log('🔐 [GIS] Probando permisos de lectura...');
-  try {
-    const snap = await getDocs(collection(db, geomCollection));
-    console.log('✅ [GIS] Permisos OK -', snap.size, 'documentos en', geomCollection);
-    return true;
-  } catch (e) {
-    console.error('❌ [GIS] Error de permisos:', e.code, e.message);
-    updateStatus(AREA_LABEL, null, null, `Permiso: ${e.code}`);
-    
-    if (e.code === 'permission-denied') {
-      let msg = '🔒 ERROR DE PERMISOS\n\n';
-      msg += 'No tienes acceso a: ' + geomCollection + '\n\n';
-      msg += 'Posibles causas:\n';
-      msg += '1. App Check en "Aplicación obligatoria" → Activar ENABLE_APP_CHECK\n';
-      msg += '2. Reglas de Firestore muy restrictivas\n';
-      msg += '3. Proyecto incorrecto en Firebase Console\n\n';
-      msg += 'Revisa la consola para más detalles.';
-      alert(msg);
-    }
-    return false;
-  }
-}
+// 1.1) Configuración de Mapa
+const latInicial = parseFloat(urlParams.get('lat'))  ?? -27.366;
+const lngInicial = parseFloat(urlParams.get('lng'))  ?? -70.332;
+const zoomInicial= parseInt(urlParams.get('zoom'))   ?? 14;
 
-// ============================================================================
-// 0.7) VALIDACIÓN DE TAMAÑO
-// ============================================================================
-function validarTamanioDoc(geojson) {
-  const sizeBytes = new Blob([JSON.stringify(geojson)]).size;
-  const sizeMB = sizeBytes / (1024 * 1024);
-  
-  if (sizeMB >= MAX_DOC_SIZE_MB) {
-    const msg = `⚠️ DOCUMENTO DEMASIADO GRANDE\n\n` +
-                `Tamaño: ${sizeMB.toFixed(2)} MB\n` +
-                `Límite: ${MAX_DOC_SIZE_MB} MB\n\n` +
-                `Este documento supera el límite de Firestore.\n` +
-                `Considera simplificar la geometría o usar Storage.`;
-    alert(msg);
-    return false;
-  }
-  
-  return true;
-}
-
-// ============================================================================
-// 0.8) Utilidades de FID persistente
-// ============================================================================
-const newFID = () => (crypto?.randomUUID?.() ?? (Date.now() + '-' + Math.random().toString(36).slice(2)));
-
-function ensureFID(geojson) {
-  if (!geojson.properties) geojson.properties = {};
-  if (!geojson.properties.__fid) geojson.properties.__fid = newFID();
-  return geojson.properties.__fid;
-}
-
-function getFIDFromLayer(layer) {
-  return layer?.feature?.properties?.__fid;
-}
-
-function forceNewFIDIfHijack(gj) {
-  const fid = gj?.properties?.__fid;
-  if (fid && docMap.has(fid)) {
-    gj.properties.__fid = newFID();
-  }
-}
-
-// ============================================================================
-// 1) MAPA y TOC
-// ============================================================================
 const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution: '© Esri — Pucobre', maxZoom: 19
+    attribution: '© Esri — Pucobre', maxZoom: 19
 }).addTo(map);
-window.map = map;
 
+// 1.2) Grupos y Controles
 const localDrafts = L.featureGroup().addTo(map);
-const docMap = new Map(); // FID → Document ID
-const ownerByFid = new Map(); // FID → Email
+const docMap = new Map();
+const ownerByFid = new Map();
 const gruposPorAutor = {};
 const layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
-
-let isSaving = false;
-let authReady = false;
-
-// ============================================================================
-// 1.1) Pendientes por FID
-// ============================================================================
-const pending = new Map(); // FID → {layer, meta}
-
-/**
- * Actualiza el estado del botón de guardar
- * Cuenta los cambios pendientes en el Map
- */
-function actualizarBoton() {
-  const btn = document.getElementById('saveBtn');
-  if (!btn) return;
-  
-  const p = pending.size;
-  btn.textContent = p ? `💾 Guardar Cambios (${p})` : `💾 Guardar Cambios`;
-  btn.disabled = !(authReady && p > 0);
-}
-
-/**
- * Marca una capa como modificada y la agrega al Map de pendientes
- * @param {L.Layer} layer - Capa de Leaflet
- * @param {Object} extraMeta - Metadatos adicionales
- * @returns {string} FID de la capa
- */
-function markDirty(layer, extraMeta = {}) {
-  const gj = layer.toGeoJSON();
-  const fid = ensureFID(gj);
-  
-  if (!layer.feature) layer.feature = gj;
-  if (!layer.feature.properties) layer.feature.properties = {};
-  layer.feature.properties.__fid = fid;
-  
-  layer.options.customMetadata = { 
-    ...(layer.options.customMetadata || {}), 
-    ...extraMeta 
-  };
-  
-  pending.set(fid, { layer, meta: layer.options.customMetadata });
-  actualizarBoton();
-  return fid;
-}
-
-// ... (Todo el inicio igual hasta la sección 2)
-
-// ============================================================================
-// 2) Dibujo y borrado
-// ============================================================================
-// ... (Evento CREATED igual)
-
-map.on(L.Draw.Event.EDITED, (e) => {
-  e.layers.eachLayer(layer => {
-    const fid = getFIDFromLayer(layer);
-    if (fid && docMap.has(fid)) {
-      const owner = ownerByFid.get(fid);
-      if (owner !== userEmail) {
-        alert(`Esta capa pertenece a ${owner}. No puedes editarla.`);
-        return;
-      }
-    }
-    
-    const gj = layer.toGeoJSON();
-    ensureFID(gj);
-    if (!validarTamanioDoc(gj)) return;
-    
-    const meta = layer.options.customMetadata || {};
-    const newLayer = L.geoJSON(gj).getLayers()[0];
-    newLayer.options.customMetadata = meta;
-    
-    // ✅ CORRECCIÓN SEGURA: Solo aplicar estilo si es un camino/polígono (L.Path)
-    if (newLayer instanceof L.Path && typeof newLayer.setStyle === 'function') {
-      newLayer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
-    }
-    
-    newLayer.bindPopup(generarTablaPopup(meta.comentario, userEmail, "Editado", gj.properties));
-    localDrafts.addLayer(newLayer);
-    markDirty(newLayer, meta);
-    
-    try { map.removeLayer(layer); } catch {}
-  });
-});
-
-// ... (Evento DELETED igual)
+const pending = new Map();
 
 // ============================================================================
 // 3) CARGA DE ARCHIVOS (KML/GeoJSON)
