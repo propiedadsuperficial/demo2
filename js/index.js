@@ -281,25 +281,14 @@ let authReady = false;
 const pending = new Map();
 
 function actualizarBoton() {
-  const btn = document.getElementById('saveBtn');
-  if (!btn) return;
-  const p = pending.size;
-  btn.textContent = p ? `💾 Guardar Cambios (${p})` : `💾 Guardar Cambios`;
-  btn.disabled = !(authReady && p > 0);
-}
+    const btn = document.getElementById('saveBtn');
+    if (!btn) return;
 
-function markDirty(layer, extraMeta = {}) {
-  const gj = layer.toGeoJSON();
-  const fid = ensureFID(gj);
-  
-  if (!layer.feature) layer.feature = gj;
-  if (!layer.feature.properties) layer.feature.properties = {};
-  layer.feature.properties.__fid = fid;
-  
-  layer.options.customMetadata = { ...(layer.options.customMetadata || {}), ...extraMeta };
-  pending.set(fid, { layer, meta: layer.options.customMetadata });
-  actualizarBoton();
-  return fid;
+    // Cuenta lo que hay dibujado en el mapa que no tiene ID de base de datos
+    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
+    
+    btn.disabled = n === 0;
+    btn.innerHTML = n > 0 ? `💾 Guardar ${n} nuevos` : `💾 Guardar Cambios`;
 }
 
 // ============================================================================
