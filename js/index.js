@@ -280,7 +280,15 @@ let authReady = false;
 // ============================================================================
 const pending = new Map();
 
+function actualizarBoton() {
+    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
+    const btn = document.getElementById('saveBtn');
+    if (!btn) return;
 
+    btn.disabled = (n === 0);
+    // Texto fijo sin variables, para que no aparezcan números
+    btn.innerHTML = `💾 Guardar Cambios`;
+}
 
 // ============================================================================
 // 2) Dibujo y borrado
