@@ -393,41 +393,44 @@ map.on(L.Draw.Event.DELETED, (e) => {
 // ============================================================================
 // 3) CARGA DE ARCHIVOS (KML/GeoJSON)
 // ============================================================================
-document.getElementById('kmlInput').onchange = (ev) => {
-  const file = ev.target.files?.[0];
-  if (!file) return;
-  
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const text = e.target.result;
-      
-      if (file.name.toLowerCase().endsWith('.kml')) {
-        const parser = new DOMParser();
-        const kmlDoc = parser.parseFromString(text, 'text/xml');
-        const layerGroup = omnivore.kml.parse(kmlDoc);
-        
-        layerGroup.on('ready', () => {
-          processLoadedLayers(layerGroup, file.name);
-        });
-        
-        setTimeout(() => {
-          if (layerGroup.getLayers().length > 0) {
-            processLoadedLayers(layerGroup, file.name);
-          }
-        }, 2000);
-      } else {
-        const geojson = JSON.parse(text);
-        const layerGroup = L.geoJSON(geojson);
-        processLoadedLayers(layerGroup, file.name);
-      }
-    } catch (err) {
-      console.error('Error al cargar archivo:', err);
-      alert('Error al cargar archivo: ' + (err?.message ?? 'formato inválido'));
+document.getElementById('saveBtn').onclick = async () => {
+    const layers = localDrafts.getLayers();
+    if (layers.length === 0) return;
+    
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+    btn.innerHTML = `⏳ Guardando...`;
+
+    for (const layer of layers) {
+        if (docMap.has(layer._leaflet_id)) continue; 
+        try {
+            await addDoc(collection(db, `geometrias_${proyectoID}`), {
+                feature: JSON.stringify(layer.toGeoJSON()),
+                autor: userEmail,
+                comentario: layer.options.customMetadata?.comentario || "Sin nombre",
+                archivo: layer.options.customMetadata?.archivo || "Web",
+                fecha: new Date().toLocaleString('es-CL'),
+                timestamp: serverTimestamp()
+            });
+            localDrafts.removeLayer(layer);
+        } catch (e) { 
+            console.error("Error al guardar:", e); 
+        }
     }
-  };
-  reader.readAsText(file);
-  ev.target.value = '';
+
+    // Al finalizar, forzamos el estado deshabilitado y el texto limpio
+    btn.disabled = true;
+    btn.innerHTML = `💾 Guardar Cambios`;
+    
+    // Feedback visual en el status para confirmar que terminó
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+        statusEl.innerHTML = `<span style="color:#10b981">✅ Cambios guardados</span>`;
+        // Después de 3 segundos restauramos la info del área
+        setTimeout(() => {
+            initRealtime(); // O la lógica que refresca el contador total
+        }, 3000);
+    }
 };
 
 function processLoadedLayers(layerGroup, fileName) {
