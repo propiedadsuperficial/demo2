@@ -19,11 +19,11 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gsta
 // ============================================================================
 
 
-const userEmail = validarIdentidad(); // ← seguirá pidiendo al abrir el link en una pestaña nueva
-if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
-
 const urlParams  = new URLSearchParams(window.location.search);
 const proyectoID = urlParams.get('area') ?? 'general';
+
+const userEmail = validarIdentidad(); // ← seguirá pidiendo al abrir el link en una pestaña nueva
+if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
 
 /**
  * Función que fuerza la identificación. 
