@@ -281,14 +281,15 @@ let authReady = false;
 const pending = new Map();
 
 function actualizarBoton() {
+    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
     const btn = document.getElementById('saveBtn');
     if (!btn) return;
 
-    // Cuenta lo que hay dibujado en el mapa que no tiene ID de base de datos
-    const n = localDrafts.getLayers().filter(l => !docMap.has(l._leaflet_id)).length;
+    // Solo habilitar si hay elementos nuevos (n > 0)
+    btn.disabled = (n === 0);
     
-    btn.disabled = n === 0;
-    btn.innerHTML = n > 0 ? `💾 Guardar ${n} nuevos` : `💾 Guardar Cambios`;
+    // Texto fijo según tu propuesta
+    btn.innerHTML = `💾 Guardar Cambios`;
 }
 
 // ============================================================================
