@@ -1,3 +1,4 @@
+
 // js/index.js — VERSIÓN CORREGIDA POST-AUDITORÍA
 // ✅ Todos los errores críticos corregidos
 // ✅ markDirty() definida
@@ -9,11 +10,10 @@
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
 import {
-  getFirestore, collection, setDoc, addDoc, onSnapshot, deleteDoc, doc, 
+  getFirestore, collection, setDoc, addDoc, onSnapshot, deleteDoc, doc,
   serverTimestamp, getDocs, enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence
 } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js';
-
 
 // ============================================================================
 // 0) CONTROL DE ACCESO E IDENTIDAD (BLOQUEANTE)
@@ -47,31 +47,42 @@ function validarIdentidad() {
     if (raw === null) {
       alert("Acceso denegado. Se requiere identificación para usar el GIS.");
       throw new Error("Parada de seguridad: Sin identidad");
+    }
 
+    const email = String(raw).toLowerCase().trim();
+    if (emailRegex.test(email)) {
+      try { sessionStorage.setItem('pucobre_user', email); } catch {}
+      return email;
+    }
 
+    alert("❌ Formato de correo no válido.");
+  }
+}
 
-const userEmail = validarIdentidad();
+const userEmail = validarIdentidad(); // ← pedirá en cada pestaña/ventana nueva
 if (!userEmail) throw new Error("Parada de seguridad: Sin identidad");
 
 // ============================================================================
 // 0.2) NORMALIZACIÓN DE ÁREA → COLECCIÓN
 // ============================================================================
 function normalizeArea(raw) {
-    const s = String(raw ?? '').toLowerCase().trim();
-    const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
-    
-    // Lógica para POZO 13
-    if (['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2)) {
-        return { area: 'pozo13', collection: 'geometrias_pozo13' };
-    }
-    
-    // Lógica para ROL 23-4
-    const isRol234 = ['rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', '23_4', '234'].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2);
-    if (isRol234) {
-        return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
-    }
-    
-    return { area: s2 || 'general', collection: 'geometrias' };
+  const s  = String(raw ?? '').toLowerCase().trim();
+  const s2 = s.replace(/\s+/g, '').replace(/-/g, '_');
+
+  // Lógica para POZO 13
+  if (['pozo13', 'pozo_13', 'p13', 'pozo 13'].map(x => x.replace(/\s+/g, '').replace(/-/g, '_')).includes(s2)) {
+    return { area: 'pozo13', collection: 'geometrias_pozo13' };
+  }
+
+  // Lógica para ROL 23-4
+  const isRol234 = ['rol23_4', 'rol234', 'rol_23_4', 'rol23-4', 'rol 23-4', '23_4', '234']
+    .map(x => x.replace(/\s+/g, '').replace(/-/g, '_'))
+    .includes(s2);
+  if (isRol234) {
+    return { area: 'rol23_4', collection: 'geometrias_rol23_4' };
+  }
+
+  return { area: s2 || 'general', collection: 'geometrias' };
 }
 
 const { area: areaNorm, collection: geomCollection } = normalizeArea(proyectoID);
@@ -82,35 +93,43 @@ document.title = `GIS Pucobre — ${AREA_LABEL}`;
 // 1) INICIALIZACIÓN DE INSTANCIAS (FIREBASE & MAPA)
 // ============================================================================
 const firebaseConfig = {
-    apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
-    authDomain: "gis-pucobre.firebaseapp.com",
-    projectId: "gis-pucobre",
-    storageBucket: "gis-pucobre.appspot.com",
-    messagingSenderId: "654550355942",
-    appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
+  apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
+  authDomain: "gis-pucobre.firebaseapp.com",
+  projectId: "gis-pucobre",
+  storageBucket: "gis-pucobre.appspot.com",
+  messagingSenderId: "654550355942",
+  appId: "1:654550355942:web:06a8bd8014a0faa86f5027"
 };
 
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
 
-// 1.1) Configuración de Mapa
-const latInicial = parseFloat(urlParams.get('lat'))  ?? -27.366;
-const lngInicial = parseFloat(urlParams.get('lng'))  ?? -70.332;
-const zoomInicial= parseInt(urlParams.get('zoom'))   ?? 14;
+// 1.1) Configuración de Mapa (defaults robustos)
+const latParam  = parseFloat(urlParams.get('lat'));
+const lngParam  = parseFloat(urlParams.get('lng'));
+const zoomParam = parseInt(urlParams.get('zoom'), 10);
+
+const latInicial  = Number.isFinite(latParam)  ? latParam  : -27.366;
+const lngInicial  = Number.isFinite(lngParam)  ? lngParam  : -70.332;
+const zoomInicial = Number.isFinite(zoomParam) ? zoomParam : 14;
 
 const map = L.map('map').setView([latInicial, lngInicial], zoomInicial);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri — Pucobre', maxZoom: 19
+  attribution: '© Esri — Pucobre', maxZoom: 19
 }).addTo(map);
 
 // 1.2) Grupos y Controles
-const localDrafts = L.featureGroup().addTo(map);
-const docMap = new Map();
-const ownerByFid = new Map();
-const gruposPorAutor = {};
-const layerControl = L.control.layers(null, null, { collapsed: false }).addTo(map);
-const pending = new Map();
+const localDrafts     = L.featureGroup().addTo(map);
+const docMap          = new Map();
+const ownerByFid      = new Map();
+const gruposPorAutor  = {};
+const layerControl    = L.control.layers(null, null, { collapsed: false }).addTo(map);
+const pending         = new Map();
+
+// Variables globales usadas más abajo
+let authReady = false;
+let isSaving  = false;
 
 // ============================================================================
 // 3) CARGA DE ARCHIVOS (KML/GeoJSON)
@@ -124,25 +143,25 @@ function processLoadedLayers(layerGroup, fileName) {
   for (let i = 0; i < all.length; i++) {
     const base = all[i];
     const gj = base.toGeoJSON();
-    
+
     if (!validarTamanioDoc(gj)) continue;
-    
+
     if (gj.properties?.__fid && docMap.has(gj.properties.__fid)) {
       gj.properties.__fid = newFID();
     } else {
       ensureFID(gj);
     }
-    
+
     const layer = L.geoJSON(gj).getLayers()[0];
     if (!layer) continue; // Seguridad si el GeoJSON está mal formado
 
     const props = gj.properties ?? {};
-    const name = props.name ?? props.Name ?? `Elemento ${i + 1}`;
+    const name  = props.name ?? props.Name ?? `Elemento ${i + 1}`;
 
     layer.options.customMetadata = { comentario: name, archivo: fileName, autor: userEmail };
     layer.bindPopup(generarTablaPopup(name, userEmail, "Recién cargado", props));
-    
-    // ✅ CORRECCIÓN SEGURA: Evita el error "setStyle is not a function" en Marcadores
+
+    // ✅ Evita "setStyle is not a function" en marcadores
     if (layer instanceof L.Path && typeof layer.setStyle === 'function') {
       layer.setStyle({ color: '#27ae60', weight: 2, fillOpacity: 0.2, dashArray: '5,3' });
     }
@@ -178,13 +197,14 @@ async function initRealtime() {
 
   console.log('🔄 [GIS] Iniciando listener en colección:', geomCollection);
   const colRef = collection(db, geomCollection);
-  
+
   unsubscribeRT = onSnapshot(
     colRef,
     (snap) => {
       const fromCache = snap.metadata.fromCache;
       console.log(fromCache ? '🔌 [GIS] Snapshot desde cache:' : '☁️ [GIS] Snapshot desde servidor:', snap.size, 'documentos');
-      
+
+      // Limpiar overlays previos
       for (const a in gruposPorAutor) {
         try { map.removeLayer(gruposPorAutor[a]); } catch {}
         try { layerControl.removeLayer(gruposPorAutor[a]); } catch {}
@@ -209,10 +229,10 @@ async function initRealtime() {
 
         dataByAutor[autor].forEach(item => {
           const docId = item.id;
-          
+
           try {
             let geoJSON = null;
-            
+
             if (typeof item.feature === 'string') {
               geoJSON = safeParseJSON(item.feature);
               if (!geoJSON) {
@@ -226,32 +246,32 @@ async function initRealtime() {
               console.warn(`⚠️ Documento sin feature: ${docId} (tipo: ${typeof item.feature})`);
               return;
             }
-            
+
             if (!geoJSON) {
               console.warn(`⚠️ Feature parseó pero está vacío: ${docId}`);
               return;
             }
-            
+
             const fid = ensureFID(geoJSON);
-            
+
             ownerByFid.set(fid, autor);
             docMap.set(fid, item.id);
-            
+
             const fechaLabel = item.timestamp?.toDate
               ? item.timestamp.toDate().toLocaleString('es-CL')
               : (item.fecha ?? '-');
-            
+
             const layer = L.geoJSON(geoJSON, {
               pointToLayer: (feature, latlng) => {
                 return L.marker(latlng);
               },
-              style: { 
-                color: esMio ? '#27ae60' : '#3498db', 
-                weight: 2, 
-                fillOpacity: 0.15 
+              style: {
+                color: esMio ? '#27ae60' : '#3498db',
+                weight: 2,
+                fillOpacity: 0.15
               }
             });
-            
+
             layer.eachLayer(l => {
               l.options.customMetadata = { autor: autor };
               l.bindPopup(generarTablaPopup(item.comentario, autor, fechaLabel, geoJSON.properties));
@@ -295,16 +315,15 @@ async function initRealtime() {
 function generarTablaPopup(titulo, autor, fecha, props = {}) {
   let html = `<div style="min-width:230px"><h4 style="margin:0;color:#27ae60">${escapeHTML(titulo)}</h4>`;
   html += `<small style="color:gray">👤 ${escapeHTML(autor)}  📅 ${escapeHTML(fecha ?? '-')}</small><hr><table style="width:100%;font-size:11px">`;
-  
+
   for (const k in props) {
     if (['name','Name','description','styleUrl','styleHash','__fid'].includes(k) || !props[k]) continue;
     const val = props[k];
     const disp = (typeof val === 'string' && val.startsWith('http'))
-      ? `<a href="${escapeHTML(val)}" target="_blank" rel="noopener noreferrer">${escapeHTML(val)}</a>`
-      : `${escapeHTML(String(val))}`;
+      ? `<a href="${escapeHTML(val)}" target="_blank"    : `${escapeHTML(String(val))}`;
     html += `<tr style="border-bottom:1px solid #eee"><td><b>${escapeHTML(k.toUpperCase())}</b></td><td>${disp}</td></tr>`;
   }
-  
+
   return html + `</table></div>`;
 }
 
@@ -313,7 +332,7 @@ function generarTablaPopup(titulo, autor, fecha, props = {}) {
 // ============================================================================
 document.getElementById('saveBtn').onclick = async () => {
   if (pending.size === 0 || isSaving) return;
-  
+
   if (!authReady || !auth.currentUser) {
     alert('Autenticando… intenta guardar nuevamente en 1-2 segundos.');
     return;
@@ -328,13 +347,13 @@ document.getElementById('saveBtn').onclick = async () => {
   try {
     const uid = auth.currentUser.uid;
     const ops = [];
-    
+
     for (const [fid, entry] of pending.entries()) {
       const layer = entry.layer;
       const meta  = entry.meta || {};
       const gj    = layer.toGeoJSON();
       ensureFID(gj);
-      
+
       if (!validarTamanioDoc(gj)) {
         console.warn('Omitiendo documento muy grande:', fid);
         continue;
@@ -373,18 +392,18 @@ document.getElementById('saveBtn').onclick = async () => {
     }
   } catch (e) {
     console.error('❌ Error al guardar:', e?.code, e);
-    
-    let errorMsg = '❌ Error al guardar en Firebase\n\n';
-    errorMsg += `Código: ${e?.code || 'desconocido'}\n`;
-    errorMsg += `Mensaje: ${e?.message || 'Error inesperado'}\n\n`;
-    
+
+    let errorMsg  = '❌ Error al guardar en Firebase\n\n';
+    errorMsg     += `Código: ${e?.code || 'desconocido'}\n`;
+    errorMsg     += `Mensaje: ${e?.message || 'Error inesperado'}\n\n`;
+
     if (e?.code === 'permission-denied') {
       errorMsg += '💡 Solución:\n';
       errorMsg += '1. Verifica las Reglas de Firestore\n';
       errorMsg += '2. Asegúrate de estar autenticado\n';
       errorMsg += `3. Colección: ${geomCollection}`;
     }
-    
+
     alert(errorMsg);
   } finally {
     isSaving = false;
@@ -411,26 +430,26 @@ signInAnonymously(auth).catch(err => {
 
 onAuthStateChanged(auth, (u) => {
   authReady = !!u;
-  
+
   if (authReady) {
     clearTimeout(authTimeout);
     console.log('✅ [GIS] Usuario autenticado:', u.uid);
   }
-  
+
   const userInfo = document.getElementById('userInfo');
   if (u && userInfo) userInfo.textContent = `👤 ${userEmail}`;
-  
+
   if (unsubscribeRT) {
     unsubscribeRT();
     unsubscribeRT = null;
   }
-  
+
   if (authReady) {
     initRealtime();
   } else {
     console.warn('⚠️ [GIS] Auth no lista, esperando...');
   }
-  
+
   actualizarBoton();
 });
 
@@ -445,3 +464,4 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = '';
   }
 });
+``
