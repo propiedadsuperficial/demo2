@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Acceso | GIS Pucobre</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100dvh; display: grid; place-items: center;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0b1220; color: #e5e7eb;
+    }
+    .card {
+      width: min(440px, 92vw); padding: 24px 20px; border-radius: 12px;
+      background: #111827; border: 1px solid #1f2937;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    p  { margin: 0 0 16px; color: #cbd5e1; font-size: 14px; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; }
+    input[type="email"] {
+      width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid #374151;
+      background: #0f172a; color: #e5e7eb; outline: none;
+    }
+    input[type="email"]:focus { border-color: #3b82f6; }
+    button {
+      margin-top: 14px; width: 100%; padding: 12px 16px; border: 0; border-radius: 8px;
+      background: #10b981; color: #0b1220; font-weight: 700; cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .hint { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+    .msg  { margin-top: 12px; font-size: 14px; }
+    .ok   { color: #86efac; }
+    .err  { color: #fda4af; }
+    .brand { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#27ae60; }
+  </style>
+
+  <!-- Firebase config (puedes moverlo a js/config.js si prefieres) -->
+  <script type="module">
+    export const firebaseConfig = {
+      apiKey:       "TU_API_KEY",
+      authDomain:   "TU_PROYECTO.firebaseapp.com",
+      projectId:    "TU_PROYECTO",
+      storageBucket:"TU_PROYECTO.appspot.com",
+      messagingSenderId: "XXXXXXXXXXXX",
+      appId:        "1:XXXXXXXXXXXX:web:XXXXXXXXXXXXXX"
+    };
+  </script>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><span class="dot"></span><strong>GIS Pucobre</strong></div>
+    <h1>Acceso por correo</h1>
+    <p>Ingresa tu correo corporativo para recibir un enlace de acceso.</p>
+
+    <form id="form">
+      <label for="email">Correo</label>
+      <input id="email" type="email" autocomplete="email" placeholder="tu.nombre@pucobre.cl" required />
+      <button id="sendBtn" type="submit">Enviar enlace</button>
+      <div class="hint">El enlace abrirá el mapa en la misma <em>área</em> y coordenadas si esta página recibió parámetros.</div>
+      <div id="msg" class="msg"></div>
+    </form>
+  </main>
+
+  <script type="module">
+    import { firebaseConfig } from './index.html';
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+    import {
+      getAuth,
+      setPersistence,
+      browserLocalPersistence,
+      sendSignInLinkToEmail,
+      isSignInWithEmailLink,
+      signInWithEmailLink
+    } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+
+    // 👉 URL base de producción (sin parámetros)
+    const PROD_BASE = "https://propiedadsuperficial.github.io/demo2/index.html";
+
+    // 👉 Tomamos los parámetros que nos lleguen a /acceso
+    const q = new URLSearchParams(window.location.search);
+    const passthrough = new URLSearchParams();
+    ['area','lat','lng','zoom'].forEach(k => {
+      const v = q.get(k);
+      if (v !== null && v !== '') passthrough.set(k, v);
+    });
+    const passthroughQuery = passthrough.toString(); // "" si no hay params
+
+    // URL de retorno para el enlace mágico
+    const RETURN_URL = passthroughQuery ? `${PROD_BASE}?${passthroughQuery}` : PROD_BASE;
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    await setPersistence(auth, browserLocalPersistence);
+
+    const form   = document.getElementById('form');
+    const emailI = document.getElementById('email');
+    const sendBt = document.getElementById('sendBtn');
+    const msg    = document.getElementById('msg');
+
+    const say = (text, ok = false) => {
+      msg.textContent = text;
+      msg.className = 'msg ' + (ok ? 'ok' : 'err');
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+      const email = (emailI.value || '').trim();
+      if (!email) return;
+      sendBt.disabled = true;
+
+      const actionCodeSettings = {
+        url: RETURN_URL,      // ← vuelve a producción con los mismos parámetros del mapa
+        handleCodeInApp: true
+        // dynamicLinkDomain: 'tu-dominio.page.link' // opcional si usas Dynamic Links
+      };
+
+      try {
+        await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+        window.localStorage.setItem('emailForSignIn', email);
+        say('Listo. Te enviamos un enlace de acceso. Revisa tu correo (o Spam).', true);
+        emailI.value = '';
+      } catch (err) {
+        console.error(err);
+        say('No pudimos enviar el enlace. Intenta nuevamente o contacta al administrador.');
+      } finally {
+        sendBt.disabled = false;
+      }
+    });
+
+    // Si por alguna razón el link mágico abrió /acceso (poco probable),
+    // también completamos aquí y redirigimos a RETURN_URL.
+    if (isSignInWithEmailLink(auth, window.location.href)) {
+      let email = window.localStorage.getItem('emailForSignIn') || window.prompt('Correo para completar acceso:');
+      if (email) {
+        try {
+          await signInWithEmailLink(auth, email, window.location.href);
+          window.localStorage.removeItem('emailForSignIn');
+          window.location.replace(RETURN_URL);
+        } catch (err) {
+          console.error(err);
+          say('No se pudo completar el acceso desde el enlace.', false);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
