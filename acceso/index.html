@@ -38,15 +38,16 @@
     .dot { width:10px; height:10px; border-radius:50%; background:#27ae60; }
   </style>
 
-  <!-- Firebase config (puedes moverlo a js/config.js si prefieres) -->
+  <!-- Firebase config (tu config real) -->
   <script type="module">
     export const firebaseConfig = {
-      apiKey:       "TU_API_KEY",
-      authDomain:   "TU_PROYECTO.firebaseapp.com",
-      projectId:    "TU_PROYECTO",
-      storageBucket:"TU_PROYECTO.appspot.com",
-      messagingSenderId: "XXXXXXXXXXXX",
-      appId:        "1:XXXXXXXXXXXX:web:XXXXXXXXXXXXXX"
+      apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
+      authDomain: "gis-pucobre.firebaseapp.com",
+      projectId: "gis-pucobre",
+      storageBucket: "gis-pucobre.firebasestorage.app",
+      messagingSenderId: "654550355942",
+      appId: "1:654550355942:web:06a8bd8014a0faa86f5027",
+      measurementId: "G-2CSXPQN2SC"
     };
   </script>
 </head>
@@ -60,7 +61,7 @@
       <label for="email">Correo</label>
       <input id="email" type="email" autocomplete="email" placeholder="tu.nombre@pucobre.cl" required />
       <button id="sendBtn" type="submit">Enviar enlace</button>
-      <div class="hint">El enlace abrirá el mapa en la misma <em>área</em> y coordenadas si esta página recibió parámetros.</div>
+      <div class="hint">El enlace abrirá el GIS con la misma <em>área</em> y coordenadas si esta página recibió parámetros.</div>
       <div id="msg" class="msg"></div>
     </form>
   </main>
@@ -77,35 +78,36 @@
       signInWithEmailLink
     } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
 
-    // 👉 URL base de producción (sin parámetros)
+    // URL base de producción (sin parámetros)
     const PROD_BASE = "https://propiedadsuperficial.github.io/demo2/index.html";
 
-    // 👉 Tomamos los parámetros que nos lleguen a /acceso
-    const q = new URLSearchParams(window.location.search);
+    // Heredamos parámetros recibidos en /acceso
+    const qs = new URLSearchParams(window.location.search);
     const passthrough = new URLSearchParams();
     ['area','lat','lng','zoom'].forEach(k => {
-      const v = q.get(k);
+      const v = qs.get(k);
       if (v !== null && v !== '') passthrough.set(k, v);
     });
-    const passthroughQuery = passthrough.toString(); // "" si no hay params
-
-    // URL de retorno para el enlace mágico
+    const passthroughQuery = passthrough.toString();
     const RETURN_URL = passthroughQuery ? `${PROD_BASE}?${passthroughQuery}` : PROD_BASE;
 
+    // Firebase
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     await setPersistence(auth, browserLocalPersistence);
 
+    // UI
     const form   = document.getElementById('form');
     const emailI = document.getElementById('email');
     const sendBt = document.getElementById('sendBtn');
     const msg    = document.getElementById('msg');
 
-    const say = (text, ok = false) => {
+    const say = (text, ok=false) => {
       msg.textContent = text;
       msg.className = 'msg ' + (ok ? 'ok' : 'err');
     };
 
+    // Enviar enlace mágico
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msg.textContent = '';
@@ -114,9 +116,8 @@
       sendBt.disabled = true;
 
       const actionCodeSettings = {
-        url: RETURN_URL,      // ← vuelve a producción con los mismos parámetros del mapa
+        url: RETURN_URL,         // vuelve a producción con area/lat/lng/zoom
         handleCodeInApp: true
-        // dynamicLinkDomain: 'tu-dominio.page.link' // opcional si usas Dynamic Links
       };
 
       try {
@@ -132,8 +133,7 @@
       }
     });
 
-    // Si por alguna razón el link mágico abrió /acceso (poco probable),
-    // también completamos aquí y redirigimos a RETURN_URL.
+    // Por si el enlace abre /acceso (menos común): completar y redirigir
     if (isSignInWithEmailLink(auth, window.location.href)) {
       let email = window.localStorage.getItem('emailForSignIn') || window.prompt('Correo para completar acceso:');
       if (email) {
@@ -150,3 +150,4 @@
   </script>
 </body>
 </html>
+``
