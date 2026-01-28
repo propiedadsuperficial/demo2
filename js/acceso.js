@@ -95,7 +95,7 @@ function isValidCorporate(email) {
 // --- Flujo: si ya hay sesión activa en /acceso, redirigir a PROD con params ---
 onAuthStateChanged(auth, (user) => {
   const mapParams = pickMapParams();
-  if (user && window.location.pathname.endsWith('/acceso/')) {
+  if (user && window.location.pathname.endsWith('/acceso.html')) {
     const paramsForRedirect = (mapParams.toString() ? mapParams : (loadMapParamsLocally() || new URLSearchParams()));
     const target = `${PROD_BASE}${paramsToString(paramsForRedirect)}`;
     window.location.replace(target);
