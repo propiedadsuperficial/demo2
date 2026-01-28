@@ -31,25 +31,12 @@
     }
     button:disabled { opacity: .6; cursor: not-allowed; }
     .hint { font-size: 12px; color: #94a3b8; margin-top: 8px; }
-    .msg  { margin-top: 12px; font-size: 14px; }
+    .msg  { margin-top: 12px; font-size: 14px; min-height: 1.2em; }
     .ok   { color: #86efac; }
     .err  { color: #fda4af; }
     .brand { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
     .dot { width:10px; height:10px; border-radius:50%; background:#27ae60; }
   </style>
-
-  <!-- Firebase config (tu config real) -->
-  <script type="module">
-    export const firebaseConfig = {
-      apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
-      authDomain: "gis-pucobre.firebaseapp.com",
-      projectId: "gis-pucobre",
-      storageBucket: "gis-pucobre.firebasestorage.app",
-      messagingSenderId: "654550355942",
-      appId: "1:654550355942:web:06a8bd8014a0faa86f5027",
-      measurementId: "G-2CSXPQN2SC"
-    };
-  </script>
 </head>
 <body>
   <main class="card">
@@ -67,7 +54,6 @@
   </main>
 
   <script type="module">
-    import { firebaseConfig } from './index.html';
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
     import {
       getAuth,
@@ -78,10 +64,21 @@
       signInWithEmailLink
     } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
 
+    // ⚙️ Configuración Firebase (tu config real)
+    const firebaseConfig = {
+      apiKey: "AIzaSyB3kW9ep7iOKDp87T2-er5-CuZKerA4puY",
+      authDomain: "gis-pucobre.firebaseapp.com",
+      projectId: "gis-pucobre",
+      storageBucket: "gis-pucobre.firebasestorage.app",
+      messagingSenderId: "654550355942",
+      appId: "1:654550355942:web:06a8bd8014a0faa86f5027",
+      measurementId: "G-2CSXPQN2SC"
+    };
+
     // URL base de producción (sin parámetros)
     const PROD_BASE = "https://propiedadsuperficial.github.io/demo2/index.html";
 
-    // Heredamos parámetros recibidos en /acceso
+    // Heredar parámetros recibidos en /acceso
     const qs = new URLSearchParams(window.location.search);
     const passthrough = new URLSearchParams();
     ['area','lat','lng','zoom'].forEach(k => {
@@ -91,7 +88,7 @@
     const passthroughQuery = passthrough.toString();
     const RETURN_URL = passthroughQuery ? `${PROD_BASE}?${passthroughQuery}` : PROD_BASE;
 
-    // Firebase
+    // Inicializar Firebase
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     await setPersistence(auth, browserLocalPersistence);
@@ -116,7 +113,7 @@
       sendBt.disabled = true;
 
       const actionCodeSettings = {
-        url: RETURN_URL,         // vuelve a producción con area/lat/lng/zoom
+        url: RETURN_URL,         // Vuelve a producción con area/lat/lng/zoom
         handleCodeInApp: true
       };
 
@@ -127,13 +124,20 @@
         emailI.value = '';
       } catch (err) {
         console.error(err);
-        say('No pudimos enviar el enlace. Intenta nuevamente o contacta al administrador.');
+        // Tips útiles si falla
+        if (String(err?.message || '').includes('auth/operation-not-allowed')) {
+          say('El método Email Link no está habilitado en Firebase (Authentication → Sign-in method).', false);
+        } else if (String(err?.message || '').includes('auth/invalid-continue-uri')) {
+          say('URL de retorno inválida. Agrega tu dominio en Authorized domains (Authentication → Settings).', false);
+        } else {
+          say('No pudimos enviar el enlace. Intenta nuevamente o contacta al administrador.', false);
+        }
       } finally {
         sendBt.disabled = false;
       }
     });
 
-    // Por si el enlace abre /acceso (menos común): completar y redirigir
+    // Si el enlace abre /acceso (poco común): completar y redirigir a RETURN_URL.
     if (isSignInWithEmailLink(auth, window.location.href)) {
       let email = window.localStorage.getItem('emailForSignIn') || window.prompt('Correo para completar acceso:');
       if (email) {
