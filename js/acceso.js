@@ -1,39 +1,44 @@
 // demo2/js/acceso.js
-// Autenticación "Email Link (passwordless)" preservando area/lat/lng/zoom.
-// Requiere Firebase v10 modular por CDN.
+// Flujo de autenticación con "Email Link (passwordless)" usando Firebase v10 modular (ESM por CDN).
+// Requisitos:
+// - Preservar SIEMPRE los parámetros: area, lat, lng, zoom.
+// - Persistencia local (browserLocalPersistence).
+// - Redirigir a PROD al finalizar, sin oobCode/mode/apiKey/lang en la URL.
+// - Si ya hay sesión en la página de acceso, redirigir a PROD con los mismos parámetros.
 
-const PROD_BASE   = 'https://propiedadsuperficial.github.io/demo2/';
-const ACCESO_BASE = 'https://propiedadsuperficial.github.io/demo2/acceso/';
+const PROD_BASE  = 'https://propiedadsuperficial.github.io/demo2/';
+const ACCESO_URL = 'https://propiedadsuperficial.github.io/demo2/acceso/acceso.html';
 
 // --- Utilidades de URL / parámetros ---
+const MAP_KEYS = ['area', 'lat', 'lng', 'zoom'];
 
 function getSearchParams(url = window.location.href) {
   const u = new URL(url);
   return u.searchParams;
 }
+
 function pickMapParams(sp = getSearchParams()) {
-  // Solo los 4 soportados, en el mismo orden
-  const keys = ['area', 'lat', 'lng', 'zoom'];
   const out = new URLSearchParams();
-  for (const k of keys) {
+  for (const k of MAP_KEYS) {
     const v = sp.get(k);
-    if (v != null && v !== '') out.set(k, v);
+    if (v !== null && v !== '') out.set(k, v);
   }
   return out;
 }
+
 function paramsToString(params) {
   const s = params.toString();
   return s ? `?${s}` : '';
 }
+
 function setCtxPill() {
   const pill = document.getElementById('ctx-pill');
   if (!pill) return;
   const p = pickMapParams();
-  const text = p.toString() || 'sin parámetros';
-  pill.textContent = text;
+  pill.textContent = p.toString() || 'sin parámetros';
 }
 
-// Guarda/carga parámetros para fallback
+// Persistencia simple de parámetros por si hay navegación intermedia
 const MAP_PARAMS_KEY = 'demo2:lastMapParams';
 function saveMapParamsLocally(params) {
   try { localStorage.setItem(MAP_PARAMS_KEY, params.toString()); } catch {}
@@ -42,8 +47,13 @@ function loadMapParamsLocally() {
   try {
     const raw = localStorage.getItem(MAP_PARAMS_KEY);
     if (!raw) return null;
-    const usp = new URLSearchParams(raw);
-    return pickMapParams(usp);
+    const src = new URLSearchParams(raw);
+    const pure = new URLSearchParams();
+    for (const k of MAP_KEYS) {
+      const v = src.get(k);
+      if (v !== null && v !== '') pure.set(k, v);
+    }
+    return pure;
   } catch { return null; }
 }
 
@@ -67,7 +77,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
-// Persistencia local
+// Persistencia local (requisito)
 await setPersistence(auth, browserLocalPersistence);
 
 // --- Estado UI ---
@@ -77,39 +87,41 @@ const btnEnviar = document.getElementById('btn-enviar');
 const statusEl = document.getElementById('status');
 
 function setStatus(msg, cls = '') {
+  if (!statusEl) return;
   statusEl.className = `status ${cls}`.trim();
   statusEl.textContent = msg;
 }
 function disableForm(disabled) {
-  btnEnviar.disabled = disabled;
-  emailInput.readOnly = disabled;
+  if (btnEnviar) btnEnviar.disabled = disabled;
+  if (emailInput) emailInput.readOnly = disabled;
 }
 
-// (Opcional) validar dominio. Cambia a true si quieres exigir @pucobre.cl en la UI.
+// (Opcional) UX: exigir dominio @pucobre.cl (la seguridad real va en Reglas)
 const REQUIRE_PUCOBRE_DOMAIN = false;
 function isValidCorporate(email) {
   if (!REQUIRE_PUCOBRE_DOMAIN) return true;
-  return /@pucobre\.cl$/i.test(email.trim());
+  return /@pucobre\.cl$/i.test(String(email || '').trim());
 }
 
-// --- Flujo: si ya hay sesión activa en /acceso, redirigir a PROD con params ---
+// --- Redirige a PROD si ya hay sesión activa en la página de acceso ---
 onAuthStateChanged(auth, (user) => {
-  const mapParams = pickMapParams();
-  if (user && window.location.pathname.endsWith('/acceso.html')) {
+  const isOnAcceso = window.location.pathname.endsWith('/acceso.html');
+  if (user && isOnAcceso) {
+    const mapParams = pickMapParams();
     const paramsForRedirect = (mapParams.toString() ? mapParams : (loadMapParamsLocally() || new URLSearchParams()));
     const target = `${PROD_BASE}${paramsToString(paramsForRedirect)}`;
     window.location.replace(target);
   }
 });
 
-// --- Completar sign-in si el email-link abre en /acceso ---
+// --- Completar sign-in si el email-link abre en /acceso/acceso.html ---
 const LS_EMAIL_KEY = 'demo2:emailForSignIn';
 async function maybeCompleteEmailLink() {
   const href = window.location.href;
   if (!isSignInWithEmailLink(auth, href)) return false;
 
-  // Extrae o pide email
-  let email = null;
+  // Recupera o solicita el correo
+  let email = '';
   try { email = localStorage.getItem(LS_EMAIL_KEY) || ''; } catch {}
   if (!email) {
     email = window.prompt('Confirma tu correo para completar el acceso:') || '';
@@ -117,22 +129,23 @@ async function maybeCompleteEmailLink() {
   email = email.trim();
   if (!email) {
     setStatus('No se pudo completar el acceso: correo no proporcionado.', 'err');
-    return true; // hubo intento, pero falló
+    return true;
   }
 
   try {
     disableForm(true);
     setStatus('Completando acceso…', 'warn');
-    const cred = await signInWithEmailLink(auth, email, href);
-    // Limpia la referencia local
+
+    await signInWithEmailLink(auth, email, href);
+
+    // Limpieza de correo almacenado
     try { localStorage.removeItem(LS_EMAIL_KEY); } catch {}
 
-    // Conserva parámetros del mapa
+    // Conserva parámetros del mapa y redirige a PROD sin parámetros de auth
     const usp = getSearchParams(href);
     const mapParams = pickMapParams(usp);
     if (mapParams.toString()) saveMapParamsLocally(mapParams);
 
-    // Redirige a producción SIN oobCode/mode/apiKey/lang
     const target = `${PROD_BASE}${paramsToString(mapParams)}`;
     setStatus('Acceso completado. Redirigiendo…', 'ok');
     window.location.replace(target);
@@ -145,7 +158,7 @@ async function maybeCompleteEmailLink() {
   }
 }
 
-// --- Envío del email-link desde /acceso ---
+// --- Envío del email-link desde la página de acceso ---
 function buildActionCodeUrl() {
   // El enlace debe regresar a PRODUCCIÓN con los mismos parámetros
   const params = pickMapParams();
@@ -153,16 +166,10 @@ function buildActionCodeUrl() {
   return `${PROD_BASE}${paramsToString(params)}`;
 }
 
-function currentContinueUrlForPWA() {
-  // Para email link en web pública, handleCodeInApp = true, y url debe estar en Authorized domains
-  return buildActionCodeUrl();
-}
-
 function buildActionCodeSettings() {
   return {
-    url: currentContinueUrlForPWA(),
+    url: buildActionCodeUrl(),
     handleCodeInApp: true
-    // iOS/Android bundles no aplican en web estática.
   };
 }
 
@@ -177,22 +184,25 @@ function describeAuthError(err) {
   if (code.includes('invalid-email')) {
     return 'Correo inválido. Verifica el formato.';
   }
+  if (code.includes('too-many-requests')) {
+    return 'Demasiados intentos. Espera unos minutos y vuelve a intentar.';
+  }
   return `Error de autenticación: ${err?.message || err}`;
 }
 
-// UI submit
+// Submit del formulario
 form?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const email = (emailInput.value || '').trim();
+  const email = (emailInput?.value || '').trim();
 
   if (!email) {
     setStatus('Ingresa tu correo para enviar el enlace.', 'warn');
-    emailInput.focus();
+    emailInput?.focus();
     return;
   }
   if (!isValidCorporate(email)) {
     setStatus('Este acceso requiere correo @pucobre.cl', 'warn');
-    emailInput.focus();
+    emailInput?.focus();
     return;
   }
 
@@ -200,7 +210,7 @@ form?.addEventListener('submit', async (ev) => {
     disableForm(true);
     setStatus('Enviando enlace…', 'warn');
 
-    // Guarda email para completar el flujo sin re-pedirlo
+    // Guarda email para completar sin re-pedirlo
     try { localStorage.setItem(LS_EMAIL_KEY, email); } catch {}
 
     const acs = buildActionCodeSettings();
@@ -214,8 +224,6 @@ form?.addEventListener('submit', async (ev) => {
   }
 });
 
-// Init vista
+// Inicialización de UI y, si aplica, completar el email-link
 setCtxPill();
-
-// Intenta completar sign-in si el enlace llegó a /acceso
 await maybeCompleteEmailLink();
