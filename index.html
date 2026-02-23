@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GIS Pucobre</title>
-  
+
   <link rel="preconnect" href="https://www.gstatic.com">
   <link rel="preconnect" href="https://firestore.googleapis.com">
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" crossorigin="anonymous">
-  
+
   <style>
     /* ============================================================================
        VARIABLES Y RESET
@@ -23,21 +23,21 @@
       --bg-header: #1f2937;
       --text-header: #e5e7eb;
     }
-    
+
     * { box-sizing: border-box; }
-    
+
     html, body {
       height: 100%;
       margin: 0;
       padding: 0;
       font-family: system-ui, -apple-system, sans-serif;
     }
-    
+
     body {
       display: flex;
       flex-direction: column;
     }
-    
+
     /* ============================================================================
        HEADER / TOOLBAR
        ============================================================================ */
@@ -53,28 +53,28 @@
       position: relative;
       z-index: 1000;
     }
-    
+
     .brand {
       font-weight: 700;
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    
+
     .brand-dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
       background: var(--brand);
     }
-    
+
     .toolbar {
       display: flex;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
     }
-    
+
     /* ============================================================================
        BOTONES
        ============================================================================ */
@@ -89,33 +89,21 @@
       color: white;
       transition: opacity 0.2s, transform 0.1s;
     }
-    
-    .btn:hover:not(:disabled) {
-      opacity: 0.85;
-    }
-    
-    .btn:active:not(:disabled) {
-      transform: translateY(1px);
-    }
-    
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    
-    .btn-secondary {
-      background: #3b82f6;
-    }
-    
+
+    .btn:hover:not(:disabled) { opacity: 0.85; }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary { background: #3b82f6; }
+    .btn-danger    { background: #ef4444; }
+
     /* ============================================================================
-       SPACER (empuja elementos a la derecha)
+       SPACER
        ============================================================================ */
-    .spacer {
-      flex: 1;
-    }
-    
+    .spacer { flex: 1; }
+
     /* ============================================================================
-       STATUS (contiene chips y badges)
+       STATUS
        ============================================================================ */
     .status {
       display: flex;
@@ -125,9 +113,9 @@
       color: #bdc3c7;
       flex-wrap: wrap;
     }
-    
+
     /* ============================================================================
-       CHIPS (ÁREA, MIS CAPAS)
+       CHIPS
        ============================================================================ */
     .chip {
       display: inline-flex;
@@ -143,25 +131,18 @@
       white-space: nowrap;
       transition: opacity 0.3s ease;
     }
-    
-    .chip--area {
-      color: #e5e7eb;
-      background: #374151;
-    }
-    
-    .chip--mine {
-      color: #0b1220;
-      background: #86efac;
-      border-color: #10b981;
-    }
-    
+
+    .chip--area  { color: #e5e7eb; background: #374151; }
+    .chip--mine  { color: #0b1220; background: #86efac; border-color: #10b981; }
+    .chip--error { color: #fff;    background: #ef4444; border-color: #dc2626; }
+
     .muted {
       font-size: 12px;
       color: #cbd5e1;
       white-space: nowrap;
       transition: opacity 0.3s ease;
     }
-    
+
     /* ============================================================================
        USER BADGE
        ============================================================================ */
@@ -172,7 +153,7 @@
       border-left: 1px solid #374151;
       color: var(--text-header);
     }
-    
+
     /* ============================================================================
        MAPA
        ============================================================================ */
@@ -180,18 +161,13 @@
       flex: 1;
       background: #f3f4f6;
     }
-    
+
     /* ============================================================================
-       LEAFLET CONTROLS (ajustar posición)
+       LEAFLET CONTROLS
        ============================================================================ */
-    .leaflet-control-container .leaflet-top.leaflet-left {
-      margin-top: 66px;
-    }
-    
-    .leaflet-control-container .leaflet-top.leaflet-right {
-      margin-top: 66px;
-    }
-    
+    .leaflet-control-container .leaflet-top.leaflet-left  { margin-top: 66px; }
+    .leaflet-control-container .leaflet-top.leaflet-right { margin-top: 66px; }
+
     /* ============================================================================
        RESPONSIVE
        ============================================================================ */
@@ -202,58 +178,22 @@
         flex-wrap: wrap;
         padding: 8px 12px;
       }
-      
-      .chip--mine {
-        display: none;
-      }
-      
-      .muted {
-        font-size: 11px;
-      }
-      
-      .chip {
-        font-size: 11px;
-        padding: 3px 8px;
-      }
-      
-      .btn {
-        padding: 6px 12px;
-        font-size: 13px;
-      }
-      
-      #map {
-        height: calc(100vh - 70px);
-      }
-      
+      .chip--mine { display: none; }
+      .muted      { font-size: 11px; }
+      .chip       { font-size: 11px; padding: 3px 8px; }
+      .btn        { padding: 6px 12px; font-size: 13px; }
+      #map        { height: calc(100vh - 70px); }
       .leaflet-control-container .leaflet-top.leaflet-left,
-      .leaflet-control-container .leaflet-top.leaflet-right {
-        margin-top: 80px;
-      }
+      .leaflet-control-container .leaflet-top.leaflet-right { margin-top: 80px; }
     }
-    
+
     @media (max-width: 480px) {
-      .status {
-        font-size: 11px;
-        gap: 4px;
-      }
-      
-      .user {
-        font-size: 11px;
-        padding-left: 8px;
-      }
+      .status { font-size: 11px; gap: 4px; }
+      .user   { font-size: 11px; padding-left: 8px; }
     }
-    
-    /* ============================================================================
-       ANIMACIONES (opcional)
-       ============================================================================ */
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    
-    .chip, .muted {
-      animation: fadeIn 0.3s ease;
-    }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .chip, .muted { animation: fadeIn 0.3s ease; }
   </style>
 </head>
 
@@ -263,26 +203,30 @@
       <span class="brand-dot"></span>
       <span>GIS Pucobre</span>
     </div>
-    
+
     <div class="toolbar">
       <button id="saveBtn" class="btn" disabled>💾 Guardar Cambios</button>
-      <label for="kmlInput" class="btn btn-secondary">📁 Cargar KML</label>
+      <label for="kmlInput" class="btn btn-secondary" style="cursor:pointer">📁 Cargar KML / GeoJSON</label>
       <input id="kmlInput" type="file" accept=".kml,.geojson,.json" style="display:none">
     </div>
-    
+
     <div class="spacer"></div>
-    
-    <!-- ✅ Status inicia vacío, JS lo llena inmediatamente -->
+
     <div class="status" id="status"></div>
-    
-    <div class="user" id="userInfo">👤</div>
+    <div class="user"  id="userInfo">👤</div>
   </header>
-  
+
   <div id="map"></div>
 
+  <!-- Leaflet + plugins -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" crossorigin="anonymous"></script>
+
+  <!-- Datos de concesiones (GeoJSON embebido) -->
+  <script src="layers/poligonos_sirgas_1.js"></script>
+
+  <!-- Módulo principal -->
   <script type="module" src="js/index.js"></script>
 </body>
 </html>
