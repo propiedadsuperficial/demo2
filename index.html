@@ -6,7 +6,6 @@
   <title>GIS Pucobre</title>
 
   <link rel="preconnect" href="https://www.gstatic.com">
-  <link rel="preconnect" href="https://firestore.googleapis.com">
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 
@@ -14,216 +13,177 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" crossorigin="anonymous">
 
   <style>
-    /* ============================================================================
-       VARIABLES Y RESET
-       ============================================================================ */
     :root {
       --header-h: 56px;
-      --brand: #27ae60;
-      --bg-header: #1f2937;
-      --text-header: #e5e7eb;
+      --brand:    #27ae60;
+      --bg-hdr:   #1f2937;
+      --txt-hdr:  #e5e7eb;
     }
 
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; }
 
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      font-family: system-ui, -apple-system, sans-serif;
-    }
-
-    body {
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ============================================================================
-       HEADER / TOOLBAR
-       ============================================================================ */
-    header {
-      height: var(--header-h);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 0 16px;
-      background: var(--bg-header);
-      color: var(--text-header);
-      border-bottom: 1px solid #111827;
-      position: relative;
-      z-index: 1000;
-    }
-
-    .brand {
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .brand-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--brand);
-    }
-
-    .toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    /* ============================================================================
-       BOTONES
-       ============================================================================ */
-    .btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 14px;
-      cursor: pointer;
-      background: #10b981;
-      color: white;
-      transition: opacity 0.2s, transform 0.1s;
-    }
-
-    .btn:hover:not(:disabled) { opacity: 0.85; }
-    .btn:active:not(:disabled) { transform: translateY(1px); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-secondary { background: #3b82f6; }
-    .btn-danger    { background: #ef4444; }
-
-    /* ============================================================================
-       SPACER
-       ============================================================================ */
-    .spacer { flex: 1; }
-
-    /* ============================================================================
-       STATUS
-       ============================================================================ */
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    /* ── Banner: almacenamiento bloqueado ────────────────────────────────── */
+    #storage-banner {
+      display: none;
+      background: #7c3aed;
+      color: #fff;
       font-size: 13px;
-      color: #bdc3c7;
+      padding: 8px 16px;
+      text-align: center;
+      line-height: 1.6;
+      flex-shrink: 0;
+    }
+    #storage-banner strong { color: #e9d5ff; }
+    #storage-banner em     { font-style: normal; color: #c4b5fd; }
+    #storage-banner .btn-banner {
+      margin-left: 12px;
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.4);
+      color: #fff; border-radius: 4px;
+      padding: 2px 9px; cursor: pointer; font-size: 12px;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────────── */
+    header {
+      min-height: var(--header-h);
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 14px;
+      background: var(--bg-hdr); color: var(--txt-hdr);
+      border-bottom: 1px solid #111827;
+      position: relative; z-index: 1000;
       flex-wrap: wrap;
     }
 
-    /* ============================================================================
-       CHIPS
-       ============================================================================ */
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      vertical-align: middle;
-      line-height: 1;
-      border: 1px solid #4b5563;
-      white-space: nowrap;
-      transition: opacity 0.3s ease;
-    }
+    .brand { font-weight: 700; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand); }
 
+    /* ── Modo badge ──────────────────────────────────────────────────────── */
+    #modoBadge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em;
+      white-space: nowrap; border: 1px solid;
+      transition: background .3s, color .3s, border-color .3s;
+    }
+    #modoBadge.visor  { background: #374151; color: #9ca3af; border-color: #4b5563; }
+    #modoBadge.editor { background: #166534; color: #86efac; border-color: #16a34a; }
+
+    /* ── Toolbar ─────────────────────────────────────────────────────────── */
+    .toolbar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+    /* ── Botones ─────────────────────────────────────────────────────────── */
+    .btn {
+      padding: 7px 14px; border: none; border-radius: 6px;
+      font-weight: 600; font-size: 13px; cursor: pointer;
+      white-space: nowrap; transition: opacity .2s, transform .1s;
+    }
+    .btn:hover:not(:disabled)  { opacity: .85; }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-save   { background: #10b981; color: #fff; }
+    .btn-kml    { background: #3b82f6; color: #fff; }
+    .btn-login  { background: #27ae60; color: #fff; }
+    .btn-logout { background: #374151; color: #9ca3af; font-size: 12px; padding: 6px 12px; }
+
+    .spacer { flex: 1; min-width: 8px; }
+
+    /* ── Status chips ────────────────────────────────────────────────────── */
+    .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9ca3af; flex-wrap: wrap; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 700;
+      border: 1px solid #4b5563; white-space: nowrap;
+    }
     .chip--area  { color: #e5e7eb; background: #374151; }
     .chip--mine  { color: #0b1220; background: #86efac; border-color: #10b981; }
     .chip--error { color: #fff;    background: #ef4444; border-color: #dc2626; }
+    .muted { font-size: 11px; color: #9ca3af; white-space: nowrap; }
 
-    .muted {
-      font-size: 12px;
-      color: #cbd5e1;
-      white-space: nowrap;
-      transition: opacity 0.3s ease;
+    /* ── User info ───────────────────────────────────────────────────────── */
+    #userInfo {
+      font-size: 12px; font-weight: 600;
+      padding-left: 10px; border-left: 1px solid #374151;
+      color: var(--txt-hdr); white-space: nowrap;
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis;
     }
 
-    /* ============================================================================
-       USER BADGE
-       ============================================================================ */
-    .user {
-      font-size: 13px;
-      font-weight: 600;
-      padding-left: 12px;
-      border-left: 1px solid #374151;
-      color: var(--text-header);
-    }
+    /* ── Mapa ────────────────────────────────────────────────────────────── */
+    #map { flex: 1; background: #f3f4f6; min-height: 200px; }
 
-    /* ============================================================================
-       MAPA
-       ============================================================================ */
-    #map {
-      flex: 1;
-      background: #f3f4f6;
-    }
-
-    /* ============================================================================
-       LEAFLET CONTROLS
-       ============================================================================ */
-    .leaflet-control-container .leaflet-top.leaflet-left  { margin-top: 66px; }
+    .leaflet-control-container .leaflet-top.leaflet-left,
     .leaflet-control-container .leaflet-top.leaflet-right { margin-top: 66px; }
 
-    /* ============================================================================
-       RESPONSIVE
-       ============================================================================ */
+    /* ── Responsive ──────────────────────────────────────────────────────── */
     @media (max-width: 768px) {
-      header {
-        height: auto;
-        min-height: var(--header-h);
-        flex-wrap: wrap;
-        padding: 8px 12px;
-      }
+      header { padding: 8px 10px; }
       .chip--mine { display: none; }
-      .muted      { font-size: 11px; }
-      .chip       { font-size: 11px; padding: 3px 8px; }
-      .btn        { padding: 6px 12px; font-size: 13px; }
-      #map        { height: calc(100vh - 70px); }
+      .btn { padding: 5px 9px; font-size: 12px; }
       .leaflet-control-container .leaflet-top.leaflet-left,
-      .leaflet-control-container .leaflet-top.leaflet-right { margin-top: 80px; }
+      .leaflet-control-container .leaflet-top.leaflet-right { margin-top: 82px; }
     }
-
     @media (max-width: 480px) {
-      .status { font-size: 11px; gap: 4px; }
-      .user   { font-size: 11px; padding-left: 8px; }
+      #userInfo { display: none; }
+      .muted    { display: none; }
     }
-
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    .chip, .muted { animation: fadeIn 0.3s ease; }
   </style>
 </head>
 
 <body>
+
+  <!-- Banner: almacenamiento bloqueado (Tracking Prevention) -->
+  <div id="storage-banner">
+    ⚠️ Tu navegador bloquea el <strong>almacenamiento local</strong>.
+    La sesión no se mantendrá entre recargas.
+    Permite el almacenamiento para este sitio:
+    <em>Chrome/Edge</em> → Configuración → Privacidad → Cookies → Agregar excepción;
+    <em>Firefox</em> → escudo 🛡 en la barra → desactiva protección para este sitio.
+    <button class="btn-banner"
+            onclick="document.getElementById('storage-banner').style.display='none'">
+      ✕ Cerrar
+    </button>
+  </div>
+
   <header>
     <div class="brand">
       <span class="brand-dot"></span>
       <span>GIS Pucobre</span>
     </div>
 
+    <span id="modoBadge" class="visor">👁 VISOR</span>
+
     <div class="toolbar">
-      <button id="saveBtn" class="btn" disabled>💾 Guardar Cambios</button>
-      <label for="kmlInput" class="btn btn-secondary" style="cursor:pointer">📁 Cargar KML / GeoJSON</label>
-      <input id="kmlInput" type="file" accept=".kml,.geojson,.json" style="display:none">
+      <button id="saveBtn" class="btn btn-save" disabled>💾 Guardar</button>
+
+      <label id="kmlLabel" for="kmlInput" class="btn btn-kml"
+             style="cursor:pointer; opacity:.4; pointer-events:none">
+        📁 Cargar KML
+      </label>
+      <input id="kmlInput" type="file" accept=".kml,.geojson,.json"
+             style="display:none" disabled>
+
+      <!-- Login: redirige a la página de acceso con Email Link -->
+      <button id="loginBtn"  class="btn btn-login">✉️ Iniciar sesión</button>
+      <button id="logoutBtn" class="btn btn-logout" style="display:none">Cerrar sesión</button>
     </div>
 
     <div class="spacer"></div>
 
-    <div class="status" id="status"></div>
-    <div class="user"  id="userInfo">👤</div>
+    <div class="status" id="status"><span class="muted">Cargando…</span></div>
+    <div id="userInfo">👁 Sin sesión</div>
   </header>
 
   <div id="map"></div>
 
-  <!-- Leaflet + plugins -->
+  <!-- Leaflet + plugins (CDN) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" crossorigin="anonymous"></script>
 
-  <!-- Datos de concesiones (GeoJSON embebido) -->
+  <!-- GeoJSON de concesiones -->
   <script src="layers/poligonos_sirgas_1.js"></script>
 
   <!-- Módulo principal -->
