@@ -1,0 +1,99 @@
+// =============================================================================
+// firestore.rules — GIS Pucobre v5
+//
+// Política:
+//   Lectura pública (VISOR sin login)
+//   Escritura solo para usuarios autenticados no-anónimos (Email Link)
+//
+// Colecciones:
+//   geometrias               → general / fallback   (?area=general)
+//   geometrias_pozo13        → Pozo 13               (?area=pozo13)
+//   geometrias_AltoM         → Alto Meléndez         (?area=altom)
+//   geometrias_rancagua200   → Rancagua 200          (?area=rancagua200)
+//   geometrias_PBCSX         → Planta Biocobre SX    (?area=pbcsx)
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPCIÓN A — Recomendada: cualquier usuario autenticado no-anónimo puede editar
+// ─────────────────────────────────────────────────────────────────────────────
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Editor: sesión real (Email Link u otro OAuth), no anónima
+    function isEditor() {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    match /geometrias/{document=**} {
+      allow read:  if true;
+      allow write: if isEditor();
+    }
+    match /geometrias_pozo13/{document=**} {
+      allow read:  if true;
+      allow write: if isEditor();
+    }
+    match /geometrias_AltoM/{document=**} {
+      allow read:  if true;
+      allow write: if isEditor();
+    }
+    match /geometrias_rancagua200/{document=**} {
+      allow read:  if true;
+      allow write: if isEditor();
+    }
+    match /geometrias_PBCSX/{document=**} {
+      allow read:  if true;
+      allow write: if isEditor();
+    }
+
+    // Bloqueo por defecto
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPCIÓN B — Mayor seguridad: solo correos @pucobre.cl pueden editar
+//            Descomenta este bloque y comenta el bloque de Opción A
+// ─────────────────────────────────────────────────────────────────────────────
+/*
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isPucobreEditor() {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous'
+          && request.auth.token.email.matches('.*@pucobre\\.cl$');
+    }
+
+    match /geometrias/{document=**} {
+      allow read:  if true;
+      allow write: if isPucobreEditor();
+    }
+    match /geometrias_pozo13/{document=**} {
+      allow read:  if true;
+      allow write: if isPucobreEditor();
+    }
+    match /geometrias_AltoM/{document=**} {
+      allow read:  if true;
+      allow write: if isPucobreEditor();
+    }
+    match /geometrias_rancagua200/{document=**} {
+      allow read:  if true;
+      allow write: if isPucobreEditor();
+    }
+    match /geometrias_PBCSX/{document=**} {
+      allow read:  if true;
+      allow write: if isPucobreEditor();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+*/
